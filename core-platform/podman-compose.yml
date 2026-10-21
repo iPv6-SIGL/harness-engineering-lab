@@ -1,0 +1,432 @@
+# Core platform stack — valkey, openbao, dozzle, registry, postgres, s3, apisix,
+# temporal, temporal-ui, casdoor, umami.
+#
+# Usage:
+#   podman network create core-network || true
+#   podman compose -p core up -d
+#
+# Network: `core-network` is external and shared with all business apps.
+# Naming: containers expose themselves on the network under `<service>.internal`,
+#   EXCEPT the object store — modelled as an external service (cloud-S3 style),
+#   consumed through `host.containers.internal:9000` app-side.
+#
+# ═══ 100 % OPEN SOURCE (OSI) — no open-core, no source-available ═════════════
+# Every image here ships under an OSI-approved licence, and the upstream project
+# is not an "open core" whose community edition is the crippled half of a paid
+# product. The four swaps that decision cost us, and the compatibility aliases
+# that make them invisible to the apps:
+#
+#   redis     → valkey    Redis 7.4 left OSI licensing (RSALv2/SSPLv1). Valkey
+#                         is the Linux Foundation fork, BSD-3-Clause, wire- and
+#                         command-compatible (its image even ships `redis-cli`).
+#                         Alias `redis.internal` kept → zero app-side change.
+#   vault     → openbao   Vault 1.15 moved to BUSL-1.1 (source-available, not
+#                         open source). OpenBao is the Linux Foundation fork,
+#                         MPL-2.0, same HTTP API — it still accepts the
+#                         `X-Vault-Token` header. Alias `vault.internal` kept.
+#   minio     → seaweedfs MinIO is AGPL-3.0, but the community edition had its
+#                         console and admin surface stripped in favour of the
+#                         proprietary AIStor. SeaweedFS is Apache-2.0 with a
+#                         complete S3 gateway. Same host ports (9000 API /
+#                         9001 browser) → zero app-side change.
+#   authentik → casdoor    authentik's MIT core passed the bar only under a
+#                         reviewed exception (a separately-licensed
+#                         `enterprise/` directory) and cost 2 containers + a
+#                         Valkey coupling. Casdoor is Apache-2.0 with nothing
+#                         gated — no exception needed — and runs as ONE
+#                         container (no worker), on the shared Postgres like
+#                         everything else, with no Valkey. (The `all-in-one`
+#                         image was tried and rejected: it bundles MariaDB and
+#                         has no sqlite3 driver, so it panics at boot — see the
+#                         casdoor service below.) Alias `idp.internal` kept.
+#
+# Kept as they are, already fully open source: PostgreSQL (PostgreSQL licence),
+# APISIX (Apache-2.0, ASF), distribution/registry (Apache-2.0), Dozzle (MIT).
+# Added: Temporal (MIT) — durable orchestration.
+
+name: core
+
+networks:
+  core-network:
+    external: true
+
+volumes:
+  valkey-data:
+  openbao-logs:
+  registry-data:
+  s3-data:
+  postgres-data:
+services:
+
+  # Valkey — BSD-3-Clause, Linux Foundation. The drop-in replacement for Redis
+  # (same protocol, same commands, same Streams/consumer groups). The alias
+  # `redis.internal` is kept so that no app has to be touched.
+  valkey:
+    image: docker.io/valkey/valkey:9-alpine
+    container_name: valkey.internal
+    hostname: valkey.internal
+    restart: unless-stopped
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes:
+      - valkey-data:/data
+    networks:
+      core-network:
+        aliases: [valkey.internal, redis.internal]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # OpenBao — MPL-2.0, Linux Foundation. The fork of Vault kept open source.
+  # Dev mode (in-memory, a public root token) — NEVER in production.
+  # The API is identical to Vault's, including the `X-Vault-Token` header, so an
+  # existing SDK keeps working. The alias `vault.internal` is kept.
+  openbao:
+    image: docker.io/openbao/openbao:2.6
+    container_name: openbao.internal
+    hostname: openbao.internal
+    restart: unless-stopped
+    cap_add:
+      - IPC_LOCK
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: root-dev-token
+      BAO_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      BAO_ADDR: http://0.0.0.0:8200
+    # The image's default CMD (`server -dev -dev-no-store-token`) is kept as it is:
+    # the helpers in lib/secrets.sh always pass BAO_TOKEN explicitly rather than
+    # leaning on a token cached in the container's home.
+    volumes:
+      - openbao-logs:/openbao/logs
+      # The audit device, declared. OpenBao 2.6 REMOVED enabling one through the
+      # API ("use declarative, config-based audit device management instead"), so
+      # this mount is the only way — and it means the trail is on from the first
+      # boot rather than from whenever someone remembers to run a script.
+      # See openbao/audit.hcl for the syntax traps.
+      - ./openbao/audit.hcl:/openbao/config/audit.hcl:ro
+    ports:
+      - "8200:8200"
+    networks:
+      core-network:
+        aliases: [openbao.internal, vault.internal]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8200/v1/sys/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  dozzle:
+    image: docker.io/amir20/dozzle:latest
+    container_name: dozzle.internal
+    hostname: dozzle.internal
+    restart: unless-stopped
+    environment:
+      DOZZLE_NO_ANALYTICS: "true"
+    volumes:
+      # Rootless Podman socket — adjust if you run rootful
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}/podman/podman.sock:/var/run/docker.sock:ro
+    ports:
+      - "9999:8080"
+    networks:
+      core-network:
+        aliases: [dozzle.internal]
+
+  registry:
+    image: docker.io/library/registry:2
+    container_name: registry.internal
+    hostname: registry.internal
+    restart: unless-stopped
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+    volumes:
+      - registry-data:/var/lib/registry
+    ports:
+      - "5000:5000"
+    networks:
+      core-network:
+        aliases: [registry.internal]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5000/v2/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Postgres — a shared relational database, one DB+user per app (see bootstrap.sh).
+  # A classic internal service: the alias postgres.internal, consumed backend-only.
+  # It ALSO carries Temporal's persistence (the `temporal` +
+  # `temporal_visibility` databases, created by the temporal auto-setup image).
+  #
+  # The image is `pgvector/pgvector:pg17`, not the bare `postgres:17-alpine` —
+  # same Postgres 17, same PostgreSQL licence, same wire protocol, ZERO app-side
+  # change (an app that does not touch RAG never notices). It only adds the
+  # `vector` extension's shared library on disk; an app enables it in its OWN
+  # database with `CREATE EXTENSION IF NOT EXISTS vector;` in its bootstrap.sh
+  # — no platform-level privilege beyond what bootstrap.sh already has.
+  postgres:
+    image: docker.io/pgvector/pgvector:pg17
+    container_name: postgres.internal
+    hostname: postgres.internal
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres-dev-password
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      core-network:
+        aliases: [postgres.internal]
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # SeaweedFS — Apache-2.0. S3-compatible object storage, single binary
+  # (master + volume + filer + the S3 gateway in one `weed server`).
+  # Modelled as an external service (cloud-S3 style): no `.internal` alias; apps
+  # and browsers consume the same HTTP endpoint through the published port.
+  #
+  # The ports are DELIBERATELY the historical ones so that nothing app-side moves:
+  #   9000 → 8333  the S3 API      (was the MinIO API)
+  #   9001 → 8888  the filer browser (was the MinIO console)
+  #
+  # No `-s3.config` file: the identities are stored in the filer and provisioned
+  # dynamically (`weed shell s3.configure`) — that is what lets an app create ITS
+  # OWN scoped key at bootstrap without a platform-side edit.
+  # See objectstore/seed-admin.sh (the platform admin identity) and
+  # templates/bootstrap.sh (the per-app identity).
+  s3:
+    image: docker.io/chrislusf/seaweedfs:4.44
+    container_name: s3
+    restart: unless-stopped
+    command:
+      - server
+      - -dir=/data
+      - -master.volumeSizeLimitMB=1024
+      - -filer
+      - -s3
+      - -s3.port=8333
+    volumes:
+      - s3-data:/data
+    networks:
+      - core-network
+    ports:
+      - "9000:8333"   # S3 API
+      - "9001:8888"   # Filer browser (the "console" equivalent)
+    healthcheck:
+      # /healthz, not / : once objectstore/seed-admin.sh has created the first
+      # identity, the store is AUTHENTICATED and an anonymous GET / is a 403 —
+      # the container would turn unhealthy precisely when it is set up right.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8333/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # APISIX — the `llm.internal` LLM gateway, STANDALONE mode (YAML,
+  # no etcd). OpenAI-compatible route /v1/chat/completions: a logical alias →
+  # the real model, a virtual key per app (key-auth), a token budget (ai-rate-limiting).
+  # The REAL provider key and the virtual keys arrive through the environment
+  # (injected from OpenBao at deploy time) — never in the clear in the files.
+  apisix:
+    image: docker.io/apache/apisix:3.17.0-debian
+    container_name: apisix
+    hostname: llm.internal
+    restart: unless-stopped
+    environment:
+      # The real provider keys — known to APISIX alone (secret/core/<provider>).
+      # BOTH are passed (empty for the inactive provider): the gateway is
+      # commutable via LLM_PROVIDER=openai|anthropic (apisix/seed-and-deploy.sh),
+      # and an undefined `${{VAR}}` would make the rendering fail APISIX-side.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # NB: the per-app virtual keys are injected into apisix.yaml (generated by
+      # apisix/seed-and-deploy.sh from secret/core/llm-vkeys), not through the env.
+    volumes:
+      - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+    networks:
+      core-network:
+        aliases: [llm.internal]
+    ports:
+      - "9080:9080"
+    healthcheck:
+      # The apache/apisix:debian image bundles NEITHER curl NOR wget → a
+      # zero-dependency TCP liveness. podman-compose re-wraps the test in `sh -c`
+      # (dash, with no /dev/tcp) → we delegate to bash in a single quoted argument (bash handles /dev/tcp).
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9080'"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Temporal — MIT. Durable orchestration: long-running
+  # workflows, timers, retries, compensation, human-in-the-loop, replayable
+  # history. It complements the Valkey Stream, it does NOT replace it:
+  # the Stream is the fan-out queue, Temporal is the durable state machine.
+  #
+  # `auto-setup` creates the schemas + the `default` namespace on the first boot
+  # (idempotent). It is the DEV image: in production, split
+  # temporalio/server + an explicit schema migration.
+  #
+  # One NAMESPACE PER APP is the isolation contract :
+  # an app creates its own at bootstrap, the platform knows no app by name.
+  temporal:
+    image: docker.io/temporalio/auto-setup:1.29
+    container_name: temporal.internal
+    hostname: temporal.internal
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12                 # the driver for PostgreSQL >= 12 (here 17)
+      DB_PORT: "5432"
+      POSTGRES_SEEDS: postgres.internal
+      POSTGRES_USER: postgres
+      POSTGRES_PWD: postgres-dev-password
+      # Deliberately NOT set: BIND_ON_IP. Temporal binds to the container's IP,
+      # which is exactly what `temporal.internal` resolves to for the apps and
+      # what the published port forwards to. Forcing 0.0.0.0 makes ringpop
+      # advertise 0.0.0.0 — harmless single-node, a trap as soon as you scale.
+    networks:
+      core-network:
+        aliases: [temporal.internal]
+    ports:
+      - "7233:7233"   # the gRPC frontend — the SDKs' entry point
+    healthcheck:
+      # `hostname -i` = the address the frontend really listens on (see above).
+      test: ["CMD-SHELL", "temporal operator cluster health --address $$(hostname -i):7233 | grep -q SERVING"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  # casdoor — the identity provider: OIDC, a self-service OIDC
+  # client per app (idp/onboard-oidc.sh). Apache-2.0, nothing gated — see the
+  # licence note in the header. ONE process, ONE container: no worker to run,
+  # against authentik's 2 containers.
+  #
+  # Persistence rides on the SHARED Postgres (a `casdoor` DB + user, created by
+  # idp/seed-and-deploy.sh), like authentik did. The `all-in-one` image was
+  # tried and rejected: it bundles its own MariaDB and ships NO sqlite3 driver,
+  # so `driverName: sqlite3` makes it panic at boot and never serve. Reusing
+  # the shared Postgres is both what works and what the platform already does.
+  #
+  # The secrets (the PG password, the bootstrap admin password) arrive through
+  # the environment, injected from the secret store by idp/seed-and-deploy.sh —
+  # same pattern as apisix. First boot is a plain Go process start (~seconds),
+  # not authentik's ~2-minute Django migration + blueprint import.
+  casdoor:
+    image: docker.io/casbin/casdoor:v1.858.0
+    container_name: casdoor.internal
+    hostname: casdoor.internal
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # VERIFIED against the pinned tag: the `all-in-one` image bundles MariaDB
+      # and has NO sqlite3 driver compiled in — it panics with
+      # `unknown driver "sqlite3"` and never serves. So we run the plain image
+      # on the SHARED Postgres, exactly like authentik did before it.
+      driverName: postgres
+      dataSourceName: user=casdoor password=${CASDOOR_PG_PASSWORD:-} host=postgres.internal port=5432 sslmode=disable dbname=casdoor
+      CASDOOR_BOOTSTRAP_ADMIN_PASSWORD: ${CASDOOR_BOOTSTRAP_ADMIN_PASSWORD:-}
+    networks:
+      core-network:
+        aliases: [casdoor.internal, idp.internal]
+    ports:
+      - "9300:8000"   # HTTP — the UI + the OIDC endpoints
+    healthcheck:
+      # VERIFIED: the image ships curl, wget and nc; /api/get-account answers
+      # 200 unauthenticated once the HTTP server is up.
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/get-account >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+
+  # The Temporal web UI — the operator surface: history of the runs, the input /
+  # output of each activity, the stack trace of a stuck workflow, a manual
+  # replay. Port 9233 (outside the 8000-8999 app range, adjacent to the 7233 gRPC).
+  temporal-ui:
+    image: docker.io/temporalio/ui:2.53.3
+    container_name: temporal-ui.internal
+    hostname: temporal-ui.internal
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_started
+    environment:
+      TEMPORAL_ADDRESS: temporal.internal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:9233
+    networks:
+      core-network:
+        aliases: [temporal-ui.internal]
+    ports:
+      - "9233:8080"
+
+  # Umami — MIT, the product-analytics service: navigation
+  # tracking on the app screens + the value events. It answers "what do users
+  # do"; the p99 measurement answers "is the app fast" from the API logs. Two different
+  # questions, two different pipelines — do not merge them.
+  #
+  # v3 is PostgreSQL-only (MySQL was dropped): persistence rides on the shared
+  # Postgres (an `umami` DB + user, created by analytics/seed-and-deploy.sh),
+  # like temporal. The secrets arrive through the environment, injected from
+  # the secret store by that same script.
+  #
+  # ONE WEBSITE PER APP is the isolation contract (analytics/site-create.sh):
+  # the platform knows no app by name, an app provisions its own at bootstrap.
+  #
+  # The alias is deliberately `analytics.internal`, NOT `umami.internal`: the
+  # tracker is blocklisted by HOSTNAME PATTERN in EasyPrivacy / AdGuard / uBO
+  # (`||umami.`, `||umami.*/script.js`), so the string "umami" never appears in
+  # a name a browser could resolve. Same reason for TRACKER_SCRIPT_NAME below.
+  umami:
+    image: ghcr.io/umami-software/umami:3.3.1
+    container_name: analytics.internal
+    hostname: analytics.internal
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://umami:${UMAMI_PG_PASSWORD:-}@postgres.internal:5432/umami
+      APP_SECRET: ${UMAMI_APP_SECRET:-}
+      TWO_FACTOR_ENCRYPTION_KEY: ${UMAMI_2FA_KEY:-}
+      # The real client IP. The beacon is proxied first-party by each app's API
+      # so WITHOUT this every visitor would carry the proxy's IP — and
+      # since the session id is hash(websiteId, ip, user-agent, salt), the whole
+      # audience would collapse into ONE session. This line is load-bearing.
+      CLIENT_IP_HEADER: x-forwarded-for
+      # Peer-standard privacy window. Umami ships `month`, which keeps a
+      # visitor linkable for a whole calendar month; Plausible and GoatCounter
+      # rotate every 24 h. We align on the stricter default deliberately.
+      SALT_ROTATION: day
+      # Generic script name. Verified: this ADDS an alias, it does not replace
+      # the default — /script.js stays served. So the rename is not the
+      # protection; the first-party proxy in each app is. It only
+      # matters for anyone who exposes this host directly, which we do not.
+      TRACKER_SCRIPT_NAME: t.js
+      DISABLE_TELEMETRY: "1"
+      # REDIS_URL is deliberately NOT set. Umami's cache holds session records,
+      # which feed session attribution; the shared Valkey buys us nothing at
+      # workshop volume and adds a consistency surface. Postgres is the single
+      # source of truth.
+    networks:
+      core-network:
+        aliases: [analytics.internal]
+    ports:
+      - "9400:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/heartbeat >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s

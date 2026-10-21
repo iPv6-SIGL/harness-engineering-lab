@@ -1,0 +1,290 @@
+/* ═══════════════════════════════════════════════════════════════════
+   core.theme.css — the platform's DEFAULT design tokens for the CCoE WEB APPS
+   The canonical location: core-platform/templates/core.theme.css
+   Reference: your CCoE rules — a SHOULD by default for every app; a client
+   charter replaces the VALUES here, never the token NAMES.
+
+   A DELIBERATELY SMALL PALETTE
+   ----------------------------
+   Three accent colours, not more:
+
+       #FE5815   accent  (a signal, used sparingly)
+       #09357A   primary (structure, chrome, brand text)
+       #2B8800   success-leaning green — carries the semantics of a
+                 *nominal* state, natural for an operations console.
+
+   A simplification owned deliberately vs. a slide charter:
+   - NO gradients, NO extra decorative colour;
+   - the orange is NEVER a text colour on a light background
+     (3.17:1 — below the AA threshold): flats, borders and indicators only;
+   - one single neutral family (a cool slate);
+   - motion and elevation stay discreet: it is an operations console, not a
+     landing page.
+
+   Rebranding an app = editing the VALUES of these tokens (and the theme
+   names, if you wish) in the app's copy — components never learn the
+   difference, because the design rules forbid them any colour outside the tokens.
+
+   Usage (Tailwind v4 + daisyUI 5, the app's CSS entry point, e.g. src/index.css):
+
+       @import "tailwindcss";
+       @import "./core.theme.css";   ← copied from core-platform/templates/
+
+   The rules (MUST):
+   - components: daisyUI semantic classes + tokens only,
+     never a hardcoded hex, never a raw Tailwind palette;
+   - z-index: only through the --z-* scale → class z-(--z-modal);
+   - charts: colours through --chart-* (the only permitted route to
+     uPlot / Recharts & co, which require values);
+   - touch targets: min-h-touch / min-w-touch (44 px);
+   - figures that vary over time: font-numeric.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* The default typeface — Work Sans (Google Fonts, OFL) */
+@import url("https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;600;700&display=swap");
+
+/* ────────────────────────────────────────────────────────────────────
+   GLOBAL TOKENS (theme-independent) — exposed to Tailwind
+   ──────────────────────────────────────────────────────────────────── */
+@theme {
+  --font-sans: "Work Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  /* Real-time figures — usage: class="font-numeric"
+     Tabular + lining: a € counter or a power in kW must NOT change width
+     on every tick. */
+  --font-numeric: "Work Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-numeric--font-variant-numeric: tabular-nums lining-nums;
+  --font-numeric--font-feature-settings: "tnum" 1, "lnum" 1;
+
+  /* A FLUID type scale (mobile → desktop with no breakpoint)
+     usage : text-display / text-title / text-body / text-caption / text-micro */
+  --text-display: clamp(1.6rem, 1.15rem + 2vw, 2.25rem);
+  --text-display--line-height: 1.15;
+  --text-display--font-weight: 700;
+  --text-display--letter-spacing: -0.01em;
+  --text-title: clamp(1.15rem, 1rem + 0.8vw, 1.45rem);
+  --text-title--line-height: 1.25;
+  --text-title--font-weight: 600;
+  --text-body: 0.9375rem;            /* 15px — the default body */
+  --text-body--line-height: 1.55;
+  --text-caption: 0.8125rem;         /* 13px — captions, meta, axes */
+  --text-caption--line-height: 1.4;
+  --text-micro: 0.6875rem;           /* 11px — eyebrows, badges, units */
+  --text-micro--line-height: 1.3;
+  --text-micro--letter-spacing: 0.08em;
+
+  /* A metric dedicated to counters and real-time KPIs
+     usage: text-metric — one single level, deliberately */
+  --text-metric: clamp(2rem, 1.4rem + 2.6vw, 3.25rem);
+  --text-metric--line-height: 1.05;
+  --text-metric--font-weight: 700;
+  --text-metric--letter-spacing: -0.02em;
+
+  /* The minimum touch target — usage: min-h-touch, min-w-touch, size-touch */
+  --spacing-touch: 2.75rem;          /* 44px */
+
+  /* Content widths — usage: max-w-app, max-w-prose-app */
+  --container-app: 90rem;            /* the max desktop console shell */
+  --container-prose-app: 42rem;      /* the reading column (notes, summaries) */
+
+  /* Motion — usage: duration-(--duration-base), ease-(--ease-standard) */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.3, 0, 0, 1.2);
+}
+
+:root {
+  /* Durations (UI: 120–320 ms, never > 500 ms) */
+  --duration-fast: 120ms;            /* hover, toggles, a counter tick */
+  --duration-base: 200ms;            /* everyday transitions */
+  --duration-slow: 320ms;            /* modals, drawers, bottom sheets */
+
+  /* The z-index scale (MUST — never a bare z-index)
+     Tailwind v4 usage: class="z-(--z-modal)" */
+  --z-dropdown: 1000;
+  --z-sticky: 1100;                  /* sticky bars, bottom-nav */
+  --z-overlay: 1300;                 /* backdrop */
+  --z-modal: 1400;                   /* modal / drawer / bottom-sheet */
+  --z-toast: 1500;                   /* always above everything */
+}
+
+/* Registering the two themes:
+   core = the default, core-dark = automatic if prefers-color-scheme: dark */
+@plugin "daisyui" {
+  themes: core --default, core-dark --prefersdark;
+}
+
+/* ─────────────────────────── THE LIGHT THEME ─────────────────────── */
+@plugin "daisyui/theme" {
+  name: "core";
+  default: true;
+  color-scheme: light;
+
+  /* Surfaces — white + one single neutral family (a cool slate) */
+  --color-base-100: #FFFFFF;
+  --color-base-200: #F8FAFC;
+  --color-base-300: #E2EBF0;         /* borders — the site's real value */
+  --color-base-content: #1E293B;     /* ink — never #000 (14.6:1 on white) */
+
+  /* The brand accents — 2 colours + the nominal green */
+  --color-primary: #09357A;          /* deep blue — the primary */
+  --color-primary-content: #FFFFFF;
+  --color-secondary: #2B8800;        /* Energy green — nominal generation */
+  --color-secondary-content: #FFFFFF;
+  --color-accent: #FE5815;           /* orange accent — SPARINGLY      */
+  --color-accent-content: #1E293B;   /* ink on orange = 4.6:1 (AA);
+                                        white on orange does NOT pass */
+  --color-neutral: #09357A;
+  --color-neutral-content: #E2EBF0;
+
+  /* Functional semantics (AA contrast checked on white) */
+  --color-info: #005BBB;    --color-info-content: #FFFFFF;     /* 6.5:1 */
+  --color-success: #2B8800; --color-success-content: #FFFFFF;  /* 4.5:1 */
+  --color-warning: #FE5815; --color-warning-content: #1E293B;  /* 4.6:1 */
+  --color-error: #CC233E;   --color-error-content: #FFFFFF;    /* 5.4:1 */
+
+  /* INTERACTION STATES (MUST — for the custom components;
+     daisyUI already derives the states of its own components)
+     hover: apply under @media (hover: hover) only */
+  --overlay-hover: rgba(9, 53, 122, 0.06);
+  --overlay-active: rgba(9, 53, 122, 0.12);
+  --overlay-selected: rgba(9, 53, 122, 0.10);
+  --color-focus: #005BBB;            /* the focus-visible ring */
+  --opacity-disabled: 0.45;
+
+  /* Elevation — discreet (a console), ink-tinted shadows, never black */
+  --shadow-raised: 0 1px 2px rgba(30, 41, 59, 0.06),
+                   0 4px 12px rgba(30, 41, 59, 0.08);
+  --shadow-overlay: 0 8px 30px rgba(30, 41, 59, 0.18);
+
+  /* ─── OPERATIONAL STATES ──────────────────────────────────
+     The status of a supervised asset is NEVER encoded by colour alone
+     (a11y): every state also has a label and a shape.
+     These tokens unify the rendering of badges, pills and asset cards
+     across the farm, the charts and the agent's journal. */
+  --status-nominal: #2B8800;         /* generating as expected */
+  --status-degraded: #FE5815;        /* a qualified deviation — the orange accent */
+  --status-stopped: #64748B;         /* stopped / deliberately curtailed */
+  --status-offline: #CC233E;         /* no data / unreachable */
+  --status-unknown: #94A3B8;         /* an undetermined state */
+
+  /* DATA-VIZ — a FIXED order, distinguishable in deuteranopia,
+     the only permitted route to a colour value in JS */
+  --chart-1: #005BBB;   /* deep blue — the main series (measured) */
+  --chart-2: #FE5815;   /* orange — the series in anomaly     */
+  --chart-3: #2B8800;   /* green — the reference / the theoretical */
+  --chart-4: #7A5AF8;   /* violet — market prices */
+  --chart-5: #0E7490;   /* teal — wind / weather */
+  --chart-6: #CC233E;   /* red — imbalance / a threshold exceeded */
+  --chart-grid: #E2EBF0;
+  --chart-axis: #64748B;
+  /* The forecast band (uncertainty) and the "outside the usable window" zone */
+  --chart-band: rgba(0, 91, 187, 0.12);
+  --chart-muted: rgba(100, 116, 139, 0.10);
+
+  /* Shape & depth — sharp corners, console density */
+  --radius-selector: 0.75rem;
+  --radius-field: 0.375rem;
+  --radius-box: 0.75rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;                        /* a console: no daisyUI relief */
+  --noise: 0;
+}
+
+/* ─────────────────────────── THE DARK THEME ──────────────────────── */
+/* Control-room mode: it is the default mode of a workshop projector.
+   The neutrals are derived from the brand blue (slate-navy),
+   the brand lives in the accents — never in the background. */
+@plugin "daisyui/theme" {
+  name: "core-dark";
+  default: false;
+  prefersdark: true;
+  color-scheme: dark;
+
+  --color-base-100: #0E1522;         /* the main background — deep slate-navy */
+  --color-base-200: #16202F;         /* raised surfaces (cards, panels) */
+  --color-base-300: #23303F;         /* borders / hover */
+  --color-base-content: #E2EBF0;     /* light ink (AA on base-100) */
+
+  --color-primary: #7FB2F0;   --color-primary-content: #06111F;  /* 8,3:1 */
+  --color-secondary: #7FC33B; --color-secondary-content: #0B2000; /* 8,6:1 */
+  --color-accent: #FF7A3D;    --color-accent-content: #2A0E00;   /* 7,1:1 */
+  --color-neutral: #1B2637;   --color-neutral-content: #E2EBF0;
+
+  --color-info: #62B0F5;    --color-info-content: #06111F;
+  --color-success: #7FC33B; --color-success-content: #0B2000;
+  --color-warning: #FF7A3D; --color-warning-content: #2A0E00;
+  --color-error: #F2637B;   --color-error-content: #3B0511;
+
+  --overlay-hover: rgba(226, 235, 240, 0.06);
+  --overlay-active: rgba(226, 235, 240, 0.12);
+  --overlay-selected: rgba(127, 178, 240, 0.18);
+  --color-focus: #7FB2F0;
+  --opacity-disabled: 0.40;
+
+  --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.40),
+                   0 4px 14px rgba(0, 0, 0, 0.50);
+  --shadow-overlay: 0 8px 32px rgba(0, 0, 0, 0.65);
+
+  /* Operational states — lightened for a dark background, the same semantics */
+  --status-nominal: #7FC33B;
+  --status-degraded: #FF7A3D;
+  --status-stopped: #94A3B8;
+  --status-offline: #F2637B;
+  --status-unknown: #64748B;
+
+  /* Data-viz — lightened for a dark background, the SAME ORDER */
+  --chart-1: #62B0F5;
+  --chart-2: #FF7A3D;
+  --chart-3: #7FC33B;
+  --chart-4: #A78BFA;
+  --chart-5: #38BDF8;
+  --chart-6: #F2637B;
+  --chart-grid: #23303F;
+  --chart-axis: #94A3B8;
+  --chart-band: rgba(98, 176, 245, 0.16);
+  --chart-muted: rgba(148, 163, 184, 0.12);
+
+  --radius-selector: 0.75rem;
+  --radius-field: 0.375rem;
+  --radius-box: 0.75rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+/* ───────────── The global interaction foundation ───────────── */
+
+/* A keyboard focus visible everywhere, themed */
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* Hover exists only on a fine pointer — never the only affordance */
+@media (hover: hover) and (pointer: fine) {
+  .hoverable:hover { background-color: var(--overlay-hover); }
+}
+.hoverable:active { background-color: var(--overlay-active); }
+
+/* Touch: no WebKit blue flash */
+html { -webkit-tap-highlight-color: transparent; }
+
+/* Fixed bars: respect the notches (bottom-nav, sticky headers) */
+.safe-bottom { padding-bottom: max(0.75rem, env(safe-area-inset-bottom)); }
+.safe-top    { padding-top:    max(0.75rem, env(safe-area-inset-top)); }
+
+/* Accessibility — a global neutralisation of the animations.
+   It applies ALSO to animated counters and chart transitions: the value has to
+   stay readable and exact, only the interpolation is skipped. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

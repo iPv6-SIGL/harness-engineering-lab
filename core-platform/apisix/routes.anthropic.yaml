@@ -1,0 +1,201 @@
+# APISIX standalone — the ROUTES of the `llm.internal` LLM gateway, the
+# **Anthropic**.
+#
+# ⚠️ This file is ONE of the two provider variants. `seed-and-deploy.sh` picks
+# the right one according to `LLM_PROVIDER` (the default is `openai`) and
+# concatenates it with the generated consumers to produce the runtime `apisix.yaml`:
+#     LLM_PROVIDER=openai     → routes.openai.yaml
+#     LLM_PROVIDER=anthropic  → routes.anthropic.yaml   (this file)
+# Both expose the SAME contract to the apps (the `task:*` aliases, the vkey, the
+# budget): switching provider touches NO line of application code.
+#
+# ⚠️ The `consumers:` (one virtual key per app) are NOT here: they are
+# GENERATED from Vault `secret/core/llm-vkeys` by `seed-and-deploy.sh`.
+#
+# The contract (see README.md → the LLM gateway) — UNCHANGED:
+#   - the OpenAI SDK pointed at  baseURL = http://llm.internal:9080/v1
+#   - apiKey = the app's APISIX virtual key (Authorization: Bearer <vkey>)
+#   - model  = a LOGICAL ALIAS: task:cheap | task:quality | task:vision | task:reasoning
+#
+# How it works on the Anthropic side: APISIX 3.17's `ai-proxy-multi` plugin
+# embeds an `anthropic` driver (apisix/plugins/ai-providers/anthropic.lua) that
+# exposes the `openai-chat` capability → it proxies to
+# `api.anthropic.com/v1/chat/completions`, Anthropic's **OpenAI-compatible**
+# endpoint. The client protocol (OpenAI) and the target capability coincide:
+# a passthrough, no conversion. The auth is therefore done with
+# `Authorization: Bearer sk-ant-api03-…` as with OpenAI.
+#
+# ⛔ **No `llm-images` route** in this variant: Anthropic offers no image-generation
+#    endpoint. The `task:image` alias therefore does not exist in anthropic mode —
+#    an app that depends on it has to stay in openai mode. It is not an oversight:
+#    it is the difference in scope between the two providers, and it is declared
+#    here rather than discovered as a 404.
+#
+# 🔑 The credential expected: an **Anthropic API key** (`sk-ant-api03-…`, console.anthropic.com),
+#    in Vault `secret/core/anthropic`, field `api_key`. A Claude Code OAuth token
+#    (`sk-ant-oat01-…`) is tied to the subscription and does NOT authenticate the
+#    API — it is your coding agent's credential, not the gateway's.
+#
+# ⚠️ **`task:embed` (/v1/embeddings) IS present here, and is the mirror
+#    image of the `task:image` gap above**: Anthropic has NO embeddings API at
+#    all, so the `llm-embeddings` route below always proxies to OpenAI —
+#    identical, byte for byte, to the one in routes.openai.yaml. This means
+#    an app using RAG needs `secret/core/openai` populated EVEN in anthropic
+#    mode; `apisix/seed-and-deploy.sh` seeds it regardless of the active
+#    `LLM_PROVIDER` for exactly this reason. It is a deliberate cross-provider
+#    choice (one stable embedding space regardless of the chat provider), not
+#    an omission.
+
+routes:
+  - id: llm-chat-completions
+    uri: /v1/chat/completions
+    methods:
+      - POST
+    # The upstream timeout: long generations (structured batches, extended
+    # reasoning) go past 30 s — without this, a 504 "Gateway Time-out" before the
+    # end of the generation. The same judgement as the openai variant.
+    timeout:
+      connect: 5
+      send: 30
+      read: 180
+    plugins:
+      serverless-pre-function:
+        phase: rewrite
+        functions:
+          - |
+            return function(conf, ctx)
+              local core = require("apisix.core")
+              -- 1) Bearer <vkey>  ->  the `apikey` header for key-auth
+              local auth = core.request.header(ctx, "Authorization")
+              if auth then
+                local vkey = auth:match("^[Bb]earer%s+(.+)$")
+                if vkey then core.request.set_header(ctx, "apikey", vkey) end
+              end
+              -- 2) the logical alias -> the real model in the body
+              local body = core.request.get_body()
+              if not body then return end
+              local data = core.json.decode(body)
+              if not data or not data.model then return end
+              local alias = {
+                ["task:cheap"]     = "claude-haiku-4-5-20251001", -- economical, reliable structured JSON
+                ["task:quality"]   = "claude-sonnet-5",           -- premium content generation
+                ["task:vision"]    = "claude-sonnet-5",           -- image analysis
+                ["task:reasoning"] = "claude-opus-5",             -- premium reasoning
+                -- task:image: NO Anthropic equivalent (see the banner)
+              }
+              local real = alias[data.model]
+              if real then
+                data.model = real
+                -- Anthropic REQUIRES `max_tokens` (unlike OpenAI where it is
+                -- optional). An app that does not send it would take a 400 — the
+                -- gateway absorbs the quirk, symmetrically to the handling of the
+                -- gpt-5.x/o-series on the openai side. A deliberately wide but
+                -- bounded default (FinOps: the app keeps control by sending it).
+                if data.max_tokens == nil and data.max_completion_tokens == nil then
+                  data.max_tokens = 8192
+                end
+                -- `max_completion_tokens` is an OpenAI-only name: rename it if an
+                -- app sends it (portability between the two modes).
+                if data.max_completion_tokens ~= nil then
+                  data.max_tokens = data.max_completion_tokens
+                  data.max_completion_tokens = nil
+                end
+                -- OpenAI-only parameters with no equivalent: strip them rather
+                -- than let the upstream answer 400 on an unknown field.
+                data.reasoning_effort = nil
+                data.frequency_penalty = nil
+                data.presence_penalty = nil
+                ngx.req.set_body_data(core.json.encode(data))
+              end
+            end
+      key-auth: {}
+      ai-rate-limiting:
+        instances:
+          - name: anthropic
+            provider: anthropic
+            limit: 50000          # the token budget / window — overridden per consumer
+            time_window: 60
+        rejected_code: 429
+        rejected_msg: "llm budget exceeded"
+      ai-proxy-multi:
+        # The plugin's upstream timeout (ms) — the default 30000 = a 504 on long
+        # generations. NB: to be set at the plugin level AND per instance
+        # (depending on the version, one of the two is authoritative; the unknown
+        # field is ignored without an error).
+        timeout: 180000
+        instances:
+          - name: anthropic
+            provider: anthropic
+            weight: 1
+            timeout: 180000
+            auth:
+              header:
+                Authorization: "Bearer ${{ANTHROPIC_API_KEY}}"
+
+  # The embeddings route — IDENTICAL to routes.openai.yaml's, always
+  # OpenAI (Anthropic has no embeddings API — see the banner above). Kept
+  # duplicated rather than factored out: the two route files are meant to be
+  # self-contained, concatenable variants (seed-and-deploy.sh picks exactly
+  # one), not a shared-base-plus-overrides scheme.
+  # ⚠ NOT yet exercised against a live instance — same caveat as the openai variant.
+  # ⚠ KNOWN GAP: seed-and-deploy.sh generates each consumer's per-app budget
+  #   override (secret/core/llm-budgets) with an ai-rate-limiting instance named
+  #   after the ACTIVE provider — "anthropic" here — to match the chat route.
+  #   This embeddings route's instance is named "openai" (it always proxies
+  #   OpenAI), so in anthropic mode the per-app override does NOT apply to
+  #   embeddings — every app shares the flat 50000/60s route-level default
+  #   instead. Acceptable for now (embeddings are cheap relative to chat), but
+  #   a real limitation to fix if per-app embedding budgets matter later.
+  - id: llm-embeddings
+    uri: /v1/embeddings
+    methods:
+      - POST
+    timeout:
+      connect: 5
+      send: 30
+      read: 60
+    plugins:
+      serverless-pre-function:
+        phase: rewrite
+        functions:
+          - |
+            return function(conf, ctx)
+              local core = require("apisix.core")
+              local auth = core.request.header(ctx, "Authorization")
+              if auth then
+                local vkey = auth:match("^[Bb]earer%s+(.+)$")
+                if vkey then core.request.set_header(ctx, "apikey", vkey) end
+              end
+              local body = core.request.get_body()
+              if not body then return end
+              local data = core.json.decode(body)
+              if not data or not data.model then return end
+              local alias = {
+                ["task:embed"] = "text-embedding-3-small", -- 1536-dim, cheap — the platform default
+              }
+              local real = alias[data.model]
+              if real then
+                data.model = real
+                ngx.req.set_body_data(core.json.encode(data))
+              end
+            end
+      key-auth: {}
+      ai-rate-limiting:
+        instances:
+          - name: openai
+            provider: openai
+            limit: 50000
+            time_window: 60
+        rejected_code: 429
+        rejected_msg: "llm budget exceeded"
+      ai-proxy-multi:
+        timeout: 60000
+        instances:
+          - name: openai
+            provider: openai
+            weight: 1
+            timeout: 60000
+            auth:
+              header:
+                Authorization: "Bearer ${{OPENAI_API_KEY}}"
+#END

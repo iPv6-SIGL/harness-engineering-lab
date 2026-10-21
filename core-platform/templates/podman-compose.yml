@@ -1,0 +1,95 @@
+# podman-compose.yml — an app compose skeleton (copy into the app's root).
+#
+# It joins the shared `core-network` network provided by core-platform/.
+# The contracts (the .internal DNS on the OpenBao/Valkey/Postgres side,
+# host.containers.internal on the S3 object-store side) are documented in
+# the platform README.
+#
+# A CCoE-conformant structure (stack + repo structure):
+# the 3 canonical services `frontend` (TS+Vite) / `api` (TS+Bun) / `worker` (TS+Bun).
+# Remove the unused services. The ports come from the app's range, set in
+# `.gitlab-ci.yml` (FRONTEND_PORT / API_PORT / WORKER_HEALTH_PORT — see the
+# ports convention in README.md: 10 contiguous ports per app, canonical offsets);
+# the defaults below only serve a standalone `podman compose up`.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# The single source of truth: the `APP` variable (on the `.gitlab-ci.yml` side).
+#
+# This file interpolates `${APP}` from the shell env. **DO NOT rename**
+# `${APP}` on copying — leave it as it is, only edit the line
+# `APP: myapp` in `.gitlab-ci.yml`.
+#
+# The pipeline:
+#   `.gitlab-ci.yml` defines `variables: APP: <app-name>`; gitlab-ci-local
+#   exports that variable into each job's shell env → the `${APP}` below is
+#   interpolated automatically by podman-compose.
+#
+# Standalone (with no CI):
+#   APP=myapp podman compose -p "$APP" up -d     # ports: the 8000-8009 defaults
+# ─────────────────────────────────────────────────────────────────────────
+
+name: ${APP}
+
+networks:
+  core-network:
+    external: true
+
+# The shared env variables — DRY through a YAML anchor, shared between api + worker
+x-common-env: &common-env
+  # The secret store (OpenBao) — the app reads its creds at boot (a dev token; in
+  # production: AppRole). VAULT_* is the SDK convention (node-vault…), which
+  # OpenBao's API honours unchanged.
+  VAULT_ADDR: http://openbao.internal:8200
+  VAULT_TOKEN: root-dev-token
+  VAULT_PATH: secret/${APP}
+
+  # Valkey (pub/sub, producer→consumer queues — async jobs + Airgap drain).
+  # The redis:// scheme is the client protocol, unchanged.
+  REDIS_URL: redis://valkey.internal:6379
+
+  # Postgres — host/port/database are non-secrets here; user + password from the store
+  DB_HOST: postgres.internal
+  DB_PORT: "5432"
+  DB_NAME: ${APP}
+
+  # S3 object storage — the endpoint from a container on the network
+  S3_ENDPOINT: http://host.containers.internal:9000
+  S3_BUCKET: ${APP}
+  S3_REGION: us-east-1                # the store ignores it, but the SDKs require it
+
+services:
+
+  frontend:
+    image: localhost:5000/${APP}/frontend:${TAG:-dev}
+    container_name: ${APP}-frontend
+    restart: unless-stopped
+    networks: [core-network]
+    ports:
+      - "${FRONTEND_PORT:-8000}:80"   # +0 — nginx:alpine serves on :80
+
+  api:
+    image: localhost:5000/${APP}/api:${TAG:-dev}
+    container_name: ${APP}-api
+    restart: unless-stopped
+    networks: [core-network]
+    environment: *common-env
+    ports:
+      - "${API_PORT:-8001}:8080"      # +1 — the API listens on :8080 (/health + /ready)
+    # Logs: everything on stdout/stderr — Dozzle aggregates them automatically.
+
+  worker:
+    image: localhost:5000/${APP}/worker:${TAG:-dev}
+    container_name: ${APP}-worker
+    restart: unless-stopped
+    networks: [core-network]
+    environment: *common-env
+    ports:
+      # +8 — ONLY the mini /health + /ready endpoint (health checks contract);
+      # the worker itself takes no traffic, it drains Valkey.
+      - "${WORKER_HEALTH_PORT:-8008}:8081"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/ready"]
+      interval: 10s
+      timeout: 2s
+      retries: 3
+      start_period: 30s

@@ -1,0 +1,254 @@
+# APISIX standalone — the ROUTES of the `llm.internal` LLM gateway, the
+# **OpenAI**.
+#
+# ⚠️ This file is ONE of the two provider variants. `seed-and-deploy.sh` picks
+# the right one according to `LLM_PROVIDER` (the default is `openai`) and
+# concatenates it with the generated consumers to produce the runtime `apisix.yaml`:
+#     LLM_PROVIDER=openai     → routes.openai.yaml    (this file)
+#     LLM_PROVIDER=anthropic  → routes.anthropic.yaml
+# Both expose the SAME contract to the apps (the `task:*` aliases, the vkey, the
+# budget): switching provider touches NO line of application code.
+#
+# ⚠️ The `consumers:` (one virtual key per app) are NOT here: they are
+# GENERATED from Vault `secret/core/llm-vkeys` by `seed-and-deploy.sh`, which
+# concatenates this file to produce the runtime `apisix.yaml` (gitignored).
+# → self-service provisioning: an app publishes its vkey in Vault, the gateway
+#   creates its consumer automatically (no manual edit here).
+#
+# The contract (see README.md → the LLM gateway):
+#   - the OpenAI SDK pointed at  baseURL = http://llm.internal:9080/v1
+#   - apiKey = the app's APISIX virtual key (Authorization: Bearer <vkey>)
+#   - model  = a LOGICAL ALIAS:
+#       · task:cheap | task:quality | task:vision | task:reasoning  (chat, /v1/chat/completions)
+#       · task:image                                                (image, /v1/images/generations → gpt-image-1)
+#       · task:embed                                                (embeddings, /v1/embeddings → text-embedding-3-small)
+#
+# The plugin chain on /v1/chat/completions:
+#   1. serverless-pre-function — Bearer <vkey> → the `apikey` header; alias→model.
+#   2. key-auth — authenticates through the virtual key → the consumer.
+#   3. ai-rate-limiting — the token budget → 429.
+#   4. ai-proxy-multi — proxies OpenAI with the REAL key (${{OPENAI_API_KEY}}, Vault).
+#
+# The plugin chain on /v1/images/generations (the llm-images route):
+#   1. serverless-pre-function — Bearer <vkey> → the `apikey` header; alias task:image
+#      → gpt-image-1 ; impose quality:"low", size:"1024x1024", n:1 if absent.
+#   2. key-auth — the same consumers/vkeys as the chat route.
+#   3. proxy-rewrite — Host + Authorization: Bearer ${{OPENAI_API_KEY}} (the same key).
+#   A direct upstream api.openai.com:443 (the b64_json body is returned as it is).
+#
+# The plugin chain on /v1/embeddings (the llm-embeddings route):
+#   1. serverless-pre-function — Bearer <vkey> → the `apikey` header; alias task:embed
+#      → text-embedding-3-small.
+#   2. key-auth — the same consumers/vkeys as every other route.
+#   3. ai-rate-limiting — the SAME token budget as chat: an app's
+#      embedding calls draw from the same 60 s window as its completions —
+#      deliberately one budget per app, not one per route.
+#   4. ai-proxy-multi — proxies OpenAI with the REAL key (${{OPENAI_API_KEY}}).
+#   ⚠ This route is IDENTICAL in routes.anthropic.yaml (always OpenAI — see the
+#     banner there). It is the one route that does NOT vary with `LLM_PROVIDER`.
+
+routes:
+  - id: llm-chat-completions
+    uri: /v1/chat/completions
+    methods:
+      - POST
+    # The upstream timeout: long generations (structured batches on the 5.x
+    # models) go past 30 s — without this, a 504 "Gateway Time-out" before the
+    # end of the generation (judged 2026-07).
+    timeout:
+      connect: 5
+      send: 30
+      read: 180
+    plugins:
+      serverless-pre-function:
+        phase: rewrite
+        functions:
+          - |
+            return function(conf, ctx)
+              local core = require("apisix.core")
+              -- 1) Bearer <vkey>  ->  the `apikey` header for key-auth
+              local auth = core.request.header(ctx, "Authorization")
+              if auth then
+                local vkey = auth:match("^[Bb]earer%s+(.+)$")
+                if vkey then core.request.set_header(ctx, "apikey", vkey) end
+              end
+              -- 2) the logical alias -> the real model in the body
+              local body = core.request.get_body()
+              if not body then return end
+              local data = core.json.decode(body)
+              if not data or not data.model then return end
+              local alias = {
+                ["task:cheap"]     = "gpt-4.1-mini",  -- text/SEO + reliable structured JSON, economical
+                ["task:quality"]   = "gpt-5.5",        -- premium content generation
+                ["task:vision"]    = "gpt-5.5",        -- image analysis, top vision
+                ["task:reasoning"] = "o3",             -- premium reasoning
+                -- ["task:image"] = "gpt-image-1"      -- image generation: the llm-images route (/v1/images/generations)
+              }
+              local real = alias[data.model]
+              if real then
+                data.model = real
+                -- GPT-5.x and the o series (reasoning) have a strict API the apps
+                -- do not have to know about → the gateway absorbs it:
+                --  · `max_tokens` refused → rename it to `max_completion_tokens`
+                --  · a non-default `temperature`/`top_p` refused (the SDK sends
+                --    temperature:0 for structured output) → we strip them, the
+                --    model applies its imposed default (temperature=1).
+                if real:match("^gpt%-5") or real:match("^o%d") then
+                  if data.max_tokens ~= nil then
+                    data.max_completion_tokens = data.max_tokens
+                    data.max_tokens = nil
+                  end
+                  data.temperature = nil
+                  data.top_p = nil
+                end
+                -- gpt-5.x: reasoning DISABLED by default (content generation ≠
+                -- deep reasoning; latency ÷5, cost ÷). "none" and not "low":
+                -- gpt-5.5 refuses function tools (structured outputs) with an
+                -- active reasoning_effort on /v1/chat/completions. An app may
+                -- state it explicitly in its body. It does NOT touch the
+                -- o-series (task:reasoning premium).
+                if real:match("^gpt%-5") and data.reasoning_effort == nil then
+                  data.reasoning_effort = "none"
+                end
+                ngx.req.set_body_data(core.json.encode(data))
+              end
+            end
+      key-auth: {}
+      ai-rate-limiting:
+        instances:
+          - name: openai
+            provider: openai
+            limit: 50000          # the token budget per window (tokens / 60 s) — not a max_tokens
+            time_window: 60
+        rejected_code: 429
+        rejected_msg: "llm budget exceeded"
+      ai-proxy-multi:
+        # The plugin's upstream timeout (ms) — the default 30000 = a 504 "Gateway
+        # Time-out" on long structured generations (gpt-5.x).
+        # NB: it has to be at the plugin level AND per instance (depending on the
+        # version, one of the two is authoritative — the unknown field is ignored without an error).
+        timeout: 180000
+        instances:
+          - name: openai
+            provider: openai
+            weight: 1
+            timeout: 180000
+            auth:
+              header:
+                Authorization: "Bearer ${{OPENAI_API_KEY}}"
+
+  # The image-generation route — gpt-image-1 through /v1/images/generations.
+  # ai-proxy(-multi) does NOT cover that endpoint (it specialises in
+  # chat/embeddings) → we proxy directly to OpenAI (proxy-rewrite + an https
+  # upstream) and return the {data:[{b64_json}]} body AS IT IS. A 120 s upstream
+  # timeout (low quality ~15 s/image, with margin: the same timeout trap as the chat route — at the
+  # route AND upstream level).
+  - id: llm-images
+    uri: /v1/images/generations
+    methods:
+      - POST
+    timeout:
+      connect: 5
+      send: 120
+      read: 120
+    plugins:
+      serverless-pre-function:
+        phase: rewrite
+        functions:
+          - |
+            return function(conf, ctx)
+              local core = require("apisix.core")
+              -- 1) Bearer <vkey>  ->  the `apikey` header for key-auth
+              local auth = core.request.header(ctx, "Authorization")
+              if auth then
+                local vkey = auth:match("^[Bb]earer%s+(.+)$")
+                if vkey then core.request.set_header(ctx, "apikey", vkey) end
+              end
+              -- 2) the logical alias task:image -> the real model + the imposed FinOps
+              local body = core.request.get_body()
+              if not body then return end
+              local data = core.json.decode(body)
+              if not data then return end
+              if data.model == "task:image" then
+                data.model = "gpt-image-1"
+              end
+              -- Imposes the FinOps defaults if the app does not supply them.
+              if data.quality == nil then data.quality = "low" end
+              if data.size == nil then data.size = "1024x1024" end
+              if data.n == nil then data.n = 1 end
+              ngx.req.set_body_data(core.json.encode(data))
+            end
+      key-auth: {}
+      proxy-rewrite:
+        # The real OpenAI key (Vault) replaces the vkey; Host = the OpenAI upstream.
+        headers:
+          set:
+            Authorization: "Bearer ${{OPENAI_API_KEY}}"
+    upstream:
+      scheme: https
+      pass_host: node
+      nodes:
+        "api.openai.com:443": 1
+      timeout:
+        connect: 5
+        send: 120
+        read: 120
+
+  # The embeddings route — text-embedding-3-small through /v1/embeddings.
+  # ⚠ NOT yet exercised against a live instance in this repo — verify the
+  #   ai-proxy-multi capability negotiation once against the pinned APISIX
+  #   version before relying on it in CI (see the header warning pattern used
+  #   throughout idp/*.sh for the same class of caveat).
+  - id: llm-embeddings
+    uri: /v1/embeddings
+    methods:
+      - POST
+    timeout:
+      connect: 5
+      send: 30
+      read: 60
+    plugins:
+      serverless-pre-function:
+        phase: rewrite
+        functions:
+          - |
+            return function(conf, ctx)
+              local core = require("apisix.core")
+              local auth = core.request.header(ctx, "Authorization")
+              if auth then
+                local vkey = auth:match("^[Bb]earer%s+(.+)$")
+                if vkey then core.request.set_header(ctx, "apikey", vkey) end
+              end
+              local body = core.request.get_body()
+              if not body then return end
+              local data = core.json.decode(body)
+              if not data or not data.model then return end
+              local alias = {
+                ["task:embed"] = "text-embedding-3-small", -- 1536-dim, cheap — the platform default
+              }
+              local real = alias[data.model]
+              if real then
+                data.model = real
+                ngx.req.set_body_data(core.json.encode(data))
+              end
+            end
+      key-auth: {}
+      ai-rate-limiting:
+        instances:
+          - name: openai
+            provider: openai
+            limit: 50000          # the SAME per-app budget/window as chat — one budget, not one per route
+            time_window: 60
+        rejected_code: 429
+        rejected_msg: "llm budget exceeded"
+      ai-proxy-multi:
+        timeout: 60000
+        instances:
+          - name: openai
+            provider: openai
+            weight: 1
+            timeout: 60000
+            auth:
+              header:
+                Authorization: "Bearer ${{OPENAI_API_KEY}}"
+#END

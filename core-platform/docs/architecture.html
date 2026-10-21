@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Core Platform Architecture</title>
+<style>
+:root {
+  --bg:#f7f7f5; --surface:#ffffff; --ink:#1d1d1b; --muted:#6b6b66; --line:#d9d8d2;
+  --band0:#f0efe9; --band1:#f7f7f5;
+  --core:#2f5d8a; --core-bg:#eaf1f8; --app:#7a4b9c; --app-bg:#f3ecf8; --virt:#7d7d76; --virt-bg:#f1f1ee;
+  --derived:#2f5d8a; --contract:#c0612b; --hl:#d4a017;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:#151513; --surface:#1e1e1c; --ink:#ecebe6; --muted:#9a9993; --line:#34342f;
+    --band0:#1b1b19; --band1:#151513;
+    --core:#7fb0e0; --core-bg:#1d2a37; --app:#c39be0; --app-bg:#2a2133; --virt:#a3a39c; --virt-bg:#232320;
+    --derived:#7fb0e0; --contract:#eb8d55; --hl:#f0c040;
+  }
+}
+:root[data-theme="dark"] {
+  --bg:#151513; --surface:#1e1e1c; --ink:#ecebe6; --muted:#9a9993; --line:#34342f;
+  --band0:#1b1b19; --band1:#151513;
+  --core:#7fb0e0; --core-bg:#1d2a37; --app:#c39be0; --app-bg:#2a2133; --virt:#a3a39c; --virt-bg:#232320;
+  --derived:#7fb0e0; --contract:#eb8d55; --hl:#f0c040;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width:1280px; margin:0 auto; padding:24px 16px 48px; }
+h1 { font-size:26px; margin:0 0 4px; }
+h2 { font-size:19px; margin:36px 0 10px; }
+p.lead { color:var(--muted); margin:0 0 16px; max-width:80ch; }
+.legend { display:flex; flex-wrap:wrap; gap:16px; font-size:13px; color:var(--muted); margin:8px 0 12px; }
+.legend span { display:inline-flex; align-items:center; gap:6px; }
+.sw { width:26px; height:0; border-top:2px solid var(--derived); }
+.sw.c { border-top:2px dashed var(--contract); }
+.box { width:14px; height:14px; border-radius:3px; border:2px solid var(--core); background:var(--core-bg); }
+.box.a { border-color:var(--app); background:var(--app-bg); }
+.box.v { border-color:var(--virt); background:var(--virt-bg); border-style:dashed; }
+.diagram { background:var(--surface); border:1px solid var(--line); border-radius:12px; overflow-x:auto; }
+.diagram svg { display:block; width:100%; min-width:900px; height:auto; }
+.band.b0 { fill:var(--band0); } .band.b1 { fill:var(--band1); }
+.band-title { font-weight:600; font-size:14px; fill:var(--ink); }
+.band-sub { font-size:11px; fill:var(--muted); }
+.node rect { stroke-width:2; }
+.node.core rect { fill:var(--core-bg); stroke:var(--core); }
+.node.app rect { fill:var(--app-bg); stroke:var(--app); }
+.node.virtual rect { fill:var(--virt-bg); stroke:var(--virt); stroke-dasharray:5 4; }
+.node { cursor:pointer; outline:none; }
+.n-label { font-weight:700; font-size:15px; fill:var(--ink); }
+.n-tech { font-size:11.5px; fill:var(--muted); }
+.n-dns { font:11px ui-monospace, SFMono-Regular, Menlo, monospace; fill:var(--muted); }
+.edge { fill:none; stroke-width:1.6; opacity:.75; transition:opacity .15s; }
+.edge.derived { stroke:var(--derived); }
+.edge.contract { stroke:var(--contract); stroke-dasharray:6 4; }
+.ah.derived { fill:var(--derived); } .ah.contract { fill:var(--contract); }
+svg.focus .edge { opacity:.08; }
+svg.focus .edge.on { opacity:1; stroke-width:2.6; }
+svg.focus .node { opacity:.35; }
+svg.focus .node.on { opacity:1; }
+.node.sel rect { stroke:var(--hl); stroke-width:3; }
+#detail { margin-top:12px; padding:12px 14px; background:var(--surface); border:1px solid var(--line); border-radius:10px; min-height:52px; }
+#detail .muted { color:var(--muted); }
+.table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:10px; background:var(--surface); }
+table { border-collapse:collapse; width:100%; font-size:13.5px; }
+th, td { text-align:left; vertical-align:top; padding:9px 10px; border-bottom:1px solid var(--line); }
+th { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); background:var(--band0); position:sticky; top:0; }
+tr:last-child td { border-bottom:0; }
+tr.sel td { background:color-mix(in srgb, var(--hl) 14%, transparent); }
+td.small { font-size:12.5px; color:var(--muted); }
+code { font:12.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.muted { color:var(--muted); font-size:12.5px; }
+ul.patterns { padding-left:20px; max-width:90ch; }
+ul.patterns li { margin:6px 0; }
+footer { margin-top:32px; font-size:12px; color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+<h1>Core Platform — architecture</h1>
+<p class="lead">11 conteneurs plateforme (<code>core</code>) + 3 conteneurs par app métier (gabarit), tous sur le réseau
+externe <code>core-network</code>. 27 dépendances : les <b>dérivées</b> sont lues dans les fichiers compose,
+les <b>contrats</b> viennent de <code>bootstrap.sh</code>, des <code>seed-and-deploy.sh</code> et du README.
+Cliquez sur un service pour isoler ses flux.</p>
+
+<div class="legend">
+  <span><i class="box"></i> service plateforme</span>
+  <span><i class="box a"></i> service d'app (×N apps)</span>
+  <span><i class="box v"></i> hors conteneur</span>
+  <span><i class="sw"></i> dérivé du compose</span>
+  <span><i class="sw c"></i> contrat (scripts / README)</span>
+</div>
+
+<div class="diagram"><svg viewBox="0 0 1360 900" role="img" aria-label="Schéma d'architecture du core platform"><defs><marker id="arrow-derived" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah derived"/></marker><marker id="arrow-contract" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah contract"/></marker></defs><rect class="band b0" x="0" y="30" width="1360" height="170"/><text class="band-title" x="16" y="111.0">Applications métier</text><text class="band-sub" x="16" y="129.0">gabarit d&#x27;app — ×N apps</text><rect class="band b1" x="0" y="200" width="1360" height="170"/><text class="band-title" x="16" y="281.0">Passerelles &amp; services exposés</text><text class="band-sub" x="16" y="299.0">LLM, identité, analytics</text><rect class="band b0" x="0" y="370" width="1360" height="170"/><text class="band-title" x="16" y="451.0">Orchestration &amp; messaging</text><text class="band-sub" x="16" y="469.0">asynchrone et durable</text><rect class="band b1" x="0" y="540" width="1360" height="170"/><text class="band-title" x="16" y="621.0">Données &amp; secrets</text><text class="band-sub" x="16" y="639.0">état persistant</text><rect class="band b0" x="0" y="710" width="1360" height="170"/><text class="band-title" x="16" y="791.0">Ops &amp; supply chain</text><text class="band-sub" x="16" y="809.0">images et logs</text><path class="edge contract" data-s="app/api" data-d="core/apisix" d="M682.8,154.0 L682.8,173.4 Q682.8,183.4 692.8,183.4 L892.7,183.4 Q902.7,183.4 902.7,193.4 L902.7,246.0" marker-end="url(#arrow-contract)"><title>api → apisix : LLM · clé virtuelle</title></path><path class="edge contract" data-s="app/api" data-d="core/casdoor" d="M584.4,154.0 L584.4,166.1 Q584.4,176.1 574.4,176.1 L407.3,176.1 Q397.3,176.1 397.3,186.1 L397.3,246.0" marker-end="url(#arrow-contract)"><title>api → casdoor : OIDC / JWKS</title></path><path class="edge derived" data-s="app/api" data-d="core/openbao" d="M699.2,154.0 L699.2,191.8 Q699.2,201.8 709.2,201.8 L771.3,201.8 Q781.3,201.8 781.3,211.8 L781.3,511.2 Q781.3,521.2 791.3,521.2 L892.7,521.2 Q902.7,521.2 902.7,531.2 L902.7,586.0" marker-end="url(#arrow-derived)"><title>api → openbao : openbao.internal:8200</title></path><path class="edge derived" data-s="app/api" data-d="core/postgres" d="M600.8,154.0 L600.8,184.5 Q600.8,194.5 590.8,194.5 L505.6,194.5 Q495.6,194.5 495.6,204.5 L495.6,500.4 Q495.6,510.4 485.6,510.4 L352.7,510.4 Q342.7,510.4 342.7,520.4 L342.7,586.0" marker-end="url(#arrow-derived)"><title>api → postgres : postgres.internal</title></path><path class="edge derived" data-s="app/api" data-d="core/registry" d="M617.2,154.0 L617.2,195.5 Q617.2,205.5 607.2,205.5 L511.3,205.5 Q501.3,205.5 501.3,215.5 L501.3,693.0 Q501.3,703.0 491.3,703.0 L380.0,703.0 Q370.0,703.0 370.0,713.0 L370.0,756.0" marker-end="url(#arrow-derived)"><title>api → registry : pull image</title></path><path class="edge derived" data-s="app/api" data-d="core/s3" d="M633.6,154.0 L633.6,188.2 Q633.6,198.2 623.6,198.2 L522.9,198.2 Q512.9,198.2 512.9,208.2 L512.9,505.8 Q512.9,515.8 522.9,515.8 L612.7,515.8 Q622.7,515.8 622.7,525.8 L622.7,586.0" marker-end="url(#arrow-derived)"><title>api → s3 : host.containers.internal:9000</title></path><path class="edge contract" data-s="app/api" data-d="core/temporal" d="M650.0,154.0 L650.0,177.1 Q650.0,187.1 640.0,187.1 L528.7,187.1 Q518.7,187.1 518.7,197.1 L518.7,331.4 Q518.7,341.4 528.7,341.4 L640.0,341.4 Q650.0,341.4 650.0,351.4 L650.0,416.0" marker-end="url(#arrow-contract)"><title>api → temporal : workflows</title></path><path class="edge contract" data-s="app/api" data-d="core/umami" d="M666.4,154.0 L666.4,171.5 Q666.4,179.7 658.2,179.7 L658.2,179.7 Q650.0,179.7 650.0,187.9 L650.0,246.0" marker-end="url(#arrow-contract)"><title>api → umami : beacon proxifié</title></path><path class="edge derived" data-s="app/api" data-d="core/valkey" d="M715.6,154.0 L715.6,180.8 Q715.6,190.8 725.6,190.8 L780.0,190.8 Q790.0,190.8 790.0,200.8 L790.0,337.7 Q790.0,347.7 800.0,347.7 L892.7,347.7 Q902.7,347.7 902.7,357.7 L902.7,416.0" marker-end="url(#arrow-derived)"><title>api → valkey : valkey.internal:6379</title></path><path class="edge contract" data-s="app/frontend" data-d="app/api" d="M370.0,76.0 L370.0,40.0 Q370.0,30.0 380.0,30.0 L640.0,30.0 Q650.0,30.0 650.0,40.0 L650.0,76.0" marker-end="url(#arrow-contract)"><title>frontend → api : REST</title></path><path class="edge contract" data-s="app/frontend" data-d="core/casdoor" d="M342.7,154.0 L342.7,246.0" marker-end="url(#arrow-contract)"><title>frontend → casdoor : login OIDC</title></path><path class="edge derived" data-s="app/frontend" data-d="core/registry" d="M397.3,154.0 L397.3,163.2 Q397.3,172.4 388.1,172.4 L257.3,172.4 Q247.3,172.4 247.3,182.4 L247.3,679.0 Q247.3,689.0 257.3,689.0 L319.0,689.0 Q329.0,689.0 329.0,699.0 L329.0,756.0" marker-end="url(#arrow-derived)"><title>frontend → registry : pull image</title></path><path class="edge derived" data-s="app/worker" data-d="core/openbao" d="M965.1,154.0 L965.1,213.9 Q965.1,223.9 975.1,223.9 L1051.3,223.9 Q1061.3,223.9 1061.3,233.9 L1061.3,527.3 Q1061.3,537.3 1051.3,537.3 L967.3,537.3 Q957.3,537.3 957.3,547.3 L957.3,586.0" marker-end="url(#arrow-derived)"><title>worker → openbao : openbao.internal:8200</title></path><path class="edge derived" data-s="app/worker" data-d="core/postgres" d="M871.4,154.0 L871.4,206.6 Q871.4,216.6 861.4,216.6 L534.4,216.6 Q524.4,216.6 524.4,226.6 L524.4,516.5 Q524.4,526.5 514.4,526.5 L434.7,526.5 Q424.7,526.5 424.7,536.5 L424.7,586.0" marker-end="url(#arrow-derived)"><title>worker → postgres : postgres.internal</title></path><path class="edge derived" data-s="app/worker" data-d="core/registry" d="M894.9,154.0 L894.9,217.6 Q894.9,227.6 884.9,227.6 L540.2,227.6 Q530.2,227.6 530.2,237.6 L530.2,707.0 Q530.2,717.0 520.2,717.0 L421.0,717.0 Q411.0,717.0 411.0,727.0 L411.0,756.0" marker-end="url(#arrow-derived)"><title>worker → registry : pull image</title></path><path class="edge derived" data-s="app/worker" data-d="core/s3" d="M918.3,154.0 L918.3,210.3 Q918.3,220.3 908.3,220.3 L808.7,220.3 Q798.7,220.3 798.7,230.3 L798.7,521.9 Q798.7,531.9 788.7,531.9 L687.3,531.9 Q677.3,531.9 677.3,541.9 L677.3,586.0" marker-end="url(#arrow-derived)"><title>worker → s3 : host.containers.internal:9000</title></path><path class="edge contract" data-s="app/worker" data-d="core/temporal" d="M941.7,154.0 L941.7,199.2 Q941.7,209.2 931.7,209.2 L817.3,209.2 Q807.3,209.2 807.3,219.2 L807.3,344.1 Q807.3,354.1 797.3,354.1 L701.0,354.1 Q691.0,354.1 691.0,364.1 L691.0,416.0" marker-end="url(#arrow-contract)"><title>worker → temporal : activités</title></path><path class="edge derived" data-s="app/worker" data-d="core/valkey" d="M988.6,154.0 L988.6,202.9 Q988.6,212.9 998.6,212.9 L1068.7,212.9 Q1078.7,212.9 1078.7,222.9 L1078.7,350.5 Q1078.7,360.5 1068.7,360.5 L967.3,360.5 Q957.3,360.5 957.3,370.5 L957.3,416.0" marker-end="url(#arrow-derived)"><title>worker → valkey : valkey.internal:6379</title></path><path class="edge contract" data-s="core/apisix" data-d="core/openbao" d="M930.0,324.0 L930.0,382.3 Q930.0,392.3 940.0,392.3 L1189.0,392.3 Q1199.0,392.3 1199.0,402.3 L1199.0,554.2 Q1199.0,564.2 1189.0,564.2 L994.7,564.2 Q984.7,564.2 984.7,574.2 L984.7,586.0" marker-end="url(#arrow-contract)"><title>apisix → openbao : clés injectées au déploiement</title></path><path class="edge contract" data-s="core/apisix" data-d="ext/llm" d="M957.3,246.0 L957.3,238.7 Q957.3,231.3 964.7,231.3 L1202.7,231.3 Q1210.0,231.3 1210.0,238.7 L1210.0,246.0" marker-end="url(#arrow-contract)"><title>apisix → OpenAI / Anthropic : vraie clé fournisseur</title></path><path class="edge contract" data-s="core/casdoor" data-d="core/openbao" d="M397.3,324.0 L397.3,363.2 Q397.3,373.2 407.3,373.2 L479.8,373.2 Q489.8,373.2 489.8,383.2 L489.8,538.1 Q489.8,548.1 499.8,548.1 L865.3,548.1 Q875.3,548.1 875.3,558.1 L875.3,586.0" marker-end="url(#arrow-contract)"><title>casdoor → openbao : secrets au déploiement</title></path><path class="edge derived" data-s="core/casdoor" data-d="core/postgres" d="M342.7,324.0 L342.7,356.8 Q342.7,366.8 332.7,366.8 L248.7,366.8 Q238.7,366.8 238.7,376.8 L238.7,532.7 Q238.7,542.7 248.7,542.7 L305.3,542.7 Q315.3,542.7 315.3,552.7 L315.3,586.0" marker-end="url(#arrow-derived)"><title>casdoor → postgres : depends_on · postgres.internal</title></path><path class="edge derived" data-s="core/dozzle" data-d="ext/podman" d="M930.0,756.0 L930.0,741.0 Q930.0,731.0 940.0,731.0 L1200.0,731.0 Q1210.0,731.0 1210.0,741.0 L1210.0,756.0" marker-end="url(#arrow-derived)"><title>dozzle → podman.sock : podman.sock (ro)</title></path><path class="edge derived" data-s="core/temporal" data-d="core/postgres" d="M650.0,494.0 L650.0,559.6 Q650.0,569.6 640.0,569.6 L378.2,569.6 Q370.0,569.6 370.0,577.8 L370.0,586.0" marker-end="url(#arrow-derived)"><title>temporal → postgres : depends_on · postgres.internal</title></path><path class="edge derived" data-s="core/temporal-ui" data-d="core/temporal" d="M370.0,416.0 L370.0,407.3 Q370.0,398.6 378.7,398.6 L600.3,398.6 Q609.0,398.6 609.0,407.3 L609.0,416.0" marker-end="url(#arrow-derived)"><title>temporal-ui → temporal : depends_on · temporal.internal:7233</title></path><path class="edge contract" data-s="core/umami" data-d="core/openbao" d="M677.3,324.0 L677.3,375.9 Q677.3,385.9 687.3,385.9 L762.7,385.9 Q772.7,385.9 772.7,395.9 L772.7,548.8 Q772.7,558.8 782.7,558.8 L920.0,558.8 Q930.0,558.8 930.0,568.8 L930.0,586.0" marker-end="url(#arrow-contract)"><title>umami → openbao : secrets au déploiement</title></path><path class="edge derived" data-s="core/umami" data-d="core/postgres" d="M622.7,324.0 L622.7,369.5 Q622.7,379.5 612.7,379.5 L517.1,379.5 Q507.1,379.5 507.1,389.5 L507.1,543.5 Q507.1,553.5 497.1,553.5 L407.3,553.5 Q397.3,553.5 397.3,563.5 L397.3,586.0" marker-end="url(#arrow-derived)"><title>umami → postgres : depends_on · postgres.internal:5432</title></path><g class="node app" data-id="app/frontend" tabindex="0"><rect x="270.0" y="76.0" width="200" height="78" rx="10"/><text class="n-label" x="282.0" y="100.0">frontend</text><text class="n-tech" x="282.0" y="120.0">nginx · TS + Vite</text><text class="n-dns" x="282.0" y="139.0">&lt;app&gt;-frontend  :8000</text><title>SPA statique servie par nginx</title></g><g class="node app" data-id="app/api" tabindex="0"><rect x="550.0" y="76.0" width="200" height="78" rx="10"/><text class="n-label" x="562.0" y="100.0">api</text><text class="n-tech" x="562.0" y="120.0">TS + Bun</text><text class="n-dns" x="562.0" y="139.0">&lt;app&gt;-api  :8001</text><title>API REST · Health Endpoint Monitoring · proxy first-party</title></g><g class="node app" data-id="app/worker" tabindex="0"><rect x="830.0" y="76.0" width="200" height="78" rx="10"/><text class="n-label" x="842.0" y="100.0">worker</text><text class="n-tech" x="842.0" y="120.0">TS + Bun</text><text class="n-dns" x="842.0" y="139.0">&lt;app&gt;-worker  :8008</text><title>Competing Consumers (Queue-Based Load Leveling)</title></g><g class="node core" data-id="core/apisix" tabindex="0"><rect x="830.0" y="246.0" width="200" height="78" rx="10"/><text class="n-label" x="842.0" y="270.0">apisix</text><text class="n-tech" x="842.0" y="290.0">Apache APISIX 3.17 · standalone</text><text class="n-dns" x="842.0" y="309.0">apisix  :9080</text><title>API Gateway / Gateway Offloading (AI gateway) · Adapter de fournisseur</title></g><g class="node core" data-id="core/casdoor" tabindex="0"><rect x="270.0" y="246.0" width="200" height="78" rx="10"/><text class="n-label" x="282.0" y="270.0">casdoor</text><text class="n-tech" x="282.0" y="290.0">Casdoor · OIDC</text><text class="n-dns" x="282.0" y="309.0">casdoor.internal  :9300</text><title>Federated Identity (Identity Provider OIDC)</title></g><g class="node core" data-id="core/umami" tabindex="0"><rect x="550.0" y="246.0" width="200" height="78" rx="10"/><text class="n-label" x="562.0" y="270.0">umami</text><text class="n-tech" x="562.0" y="290.0">Umami 3 · analytics</text><text class="n-dns" x="562.0" y="309.0">analytics.internal  :9400</text><title>Product analytics · beacon proxifié first-party</title></g><g class="node core" data-id="core/temporal" tabindex="0"><rect x="550.0" y="416.0" width="200" height="78" rx="10"/><text class="n-label" x="562.0" y="440.0">temporal</text><text class="n-tech" x="562.0" y="460.0">Temporal 1.29 · auto-setup</text><text class="n-dns" x="562.0" y="479.0">temporal.internal  :7233</text><title>Durable Execution · Saga orchestrée (compensation, timers, retries)</title></g><g class="node core" data-id="core/temporal-ui" tabindex="0"><rect x="270.0" y="416.0" width="200" height="78" rx="10"/><text class="n-label" x="282.0" y="440.0">temporal-ui</text><text class="n-tech" x="282.0" y="460.0">Temporal UI 2.53</text><text class="n-dns" x="282.0" y="479.0">temporal-ui.internal  :9233</text><title>Console opérateur</title></g><g class="node core" data-id="core/valkey" tabindex="0"><rect x="830.0" y="416.0" width="200" height="78" rx="10"/><text class="n-label" x="842.0" y="440.0">valkey</text><text class="n-tech" x="842.0" y="460.0">Valkey 9 (fork BSD de Redis)</text><text class="n-dns" x="842.0" y="479.0">valkey.internal  :6379</text><title>Cache · Pub/Sub · Queue (Streams + consumer groups)</title></g><g class="node core" data-id="core/postgres" tabindex="0"><rect x="270.0" y="586.0" width="200" height="78" rx="10"/><text class="n-label" x="282.0" y="610.0">postgres</text><text class="n-tech" x="282.0" y="630.0">PostgreSQL 17 + pgvector</text><text class="n-dns" x="282.0" y="649.0">postgres.internal  :5432</text><title>Serveur partagé · Database-per-tenant (1 DB + 1 user par app)</title></g><g class="node core" data-id="core/s3" tabindex="0"><rect x="550.0" y="586.0" width="200" height="78" rx="10"/><text class="n-label" x="562.0" y="610.0">s3</text><text class="n-tech" x="562.0" y="630.0">SeaweedFS 4.44 · S3</text><text class="n-dns" x="562.0" y="649.0">s3  :9000,9001</text><title>Object Storage modélisé en service externe · Valet Key (clé scopée par bucket)</title></g><g class="node core" data-id="core/openbao" tabindex="0"><rect x="830.0" y="586.0" width="200" height="78" rx="10"/><text class="n-label" x="842.0" y="610.0">openbao</text><text class="n-tech" x="842.0" y="630.0">OpenBao 2.6 (fork MPL de Vault)</text><text class="n-dns" x="842.0" y="649.0">openbao.internal  :8200</text><title>External Configuration Store · Secret Store centralisé</title></g><g class="node core" data-id="core/registry" tabindex="0"><rect x="270.0" y="756.0" width="200" height="78" rx="10"/><text class="n-label" x="282.0" y="780.0">registry</text><text class="n-tech" x="282.0" y="800.0">distribution/registry 2</text><text class="n-dns" x="282.0" y="819.0">registry.internal  :5000</text><title>Artifact Repository (build once, deploy many)</title></g><g class="node core" data-id="core/dozzle" tabindex="0"><rect x="830.0" y="756.0" width="200" height="78" rx="10"/><text class="n-label" x="842.0" y="780.0">dozzle</text><text class="n-tech" x="842.0" y="800.0">Dozzle</text><text class="n-dns" x="842.0" y="819.0">dozzle.internal  :9999</text><title>Log Aggregation (logs 12-factor sur stdout)</title></g><g class="node virtual" data-id="ext/llm" tabindex="0"><rect x="1110.0" y="246.0" width="200" height="78" rx="10"/><text class="n-label" x="1122.0" y="270.0">OpenAI / Anthropic</text><text class="n-tech" x="1122.0" y="290.0">API fournisseur (Internet)</text><text class="n-dns" x="1122.0" y="309.0"></text><title>Service externe</title></g><g class="node virtual" data-id="ext/podman" tabindex="0"><rect x="1110.0" y="756.0" width="200" height="78" rx="10"/><text class="n-label" x="1122.0" y="780.0">podman.sock</text><text class="n-tech" x="1122.0" y="800.0">runtime rootless</text><text class="n-dns" x="1122.0" y="819.0"></text><title>Runtime de conteneurs</title></g></svg></div>
+<div id="detail"><span class="muted">Sélectionnez un service dans le schéma ou le tableau.</span></div>
+
+<h2>Ce qui tourne dans podman</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Service</th><th>Conteneur / DNS</th><th>Image</th><th>Ports hôte→conteneur</th><th>Pattern</th><th>Pourquoi il est là</th><th>Dépend de</th><th>Compose</th></tr></thead>
+<tbody>
+<tr data-id="app/frontend"><td><b>frontend</b><br><span class="muted">app</span></td><td><code>${APP}-frontend</code></td><td><code>localhost:5000/${APP}/frontend:${TAG:-dev}</code></td><td>${FRONTEND_PORT:-8000}→80</td><td>SPA statique servie par nginx</td><td>La surface utilisateur de chaque app métier. Sert le build Vite, en-têtes de sécurité, fallback SPA.</td><td class="small">api, casdoor, registry</td><td class="small">deps : —<br>volumes : —<br>healthcheck : —</td></tr>
+<tr data-id="app/api"><td><b>api</b><br><span class="muted">app</span></td><td><code>${APP}-api</code></td><td><code>localhost:5000/${APP}/api:${TAG:-dev}</code></td><td>${API_PORT:-8001}→8080</td><td>API REST · Health Endpoint Monitoring · proxy first-party</td><td>Le point d&#x27;entrée métier : lit ses secrets dans OpenBao au boot, parle à Postgres/S3/Valkey, publie des jobs, relaie le beacon analytics.</td><td class="small">apisix, casdoor, openbao, postgres, registry, s3, temporal, umami, valkey</td><td class="small">deps : —<br>volumes : —<br>healthcheck : —</td></tr>
+<tr data-id="app/worker"><td><b>worker</b><br><span class="muted">app</span></td><td><code>${APP}-worker</code></td><td><code>localhost:5000/${APP}/worker:${TAG:-dev}</code></td><td>${WORKER_HEALTH_PORT:-8008}→8081</td><td>Competing Consumers (Queue-Based Load Leveling)</td><td>Traite en asynchrone ce que l&#x27;API dépose dans Valkey ; n&#x27;expose que /health + /ready.</td><td class="small">openbao, postgres, registry, s3, temporal, valkey</td><td class="small">deps : —<br>volumes : —<br>healthcheck : oui</td></tr>
+<tr data-id="core/apisix"><td><b>apisix</b><br><span class="muted">core</span></td><td><code>apisix</code><br><span class="muted">alias : llm.internal</span></td><td><code>docker.io/apache/apisix:3.17.0-debian</code></td><td>9080→9080</td><td>API Gateway / Gateway Offloading (AI gateway) · Adapter de fournisseur</td><td>Un seul point de sortie vers les LLM : clé virtuelle + budget de tokens par app, alias de modèles, la vraie clé fournisseur n&#x27;est connue que de lui. Bascule OpenAI ⇄ Anthropic sans toucher aux apps.</td><td class="small">openbao, OpenAI / Anthropic</td><td class="small">deps : —<br>volumes : ./apisix/config.yaml, ./apisix/apisix.yaml<br>healthcheck : oui</td></tr>
+<tr data-id="core/casdoor"><td><b>casdoor</b><br><span class="muted">core</span></td><td><code>casdoor.internal</code><br><span class="muted">alias : idp.internal</span></td><td><code>docker.io/casbin/casdoor:v1.858.0</code></td><td>9300→8000</td><td>Federated Identity (Identity Provider OIDC)</td><td>L&#x27;authentification est mutualisée : un client OIDC self-service par app, aucune app ne gère de mots de passe.</td><td class="small">openbao, postgres</td><td class="small">deps : postgres<br>volumes : —<br>healthcheck : oui</td></tr>
+<tr data-id="core/umami"><td><b>umami</b><br><span class="muted">core</span></td><td><code>analytics.internal</code></td><td><code>ghcr.io/umami-software/umami:3.3.1</code></td><td>9400→3000</td><td>Product analytics · beacon proxifié first-party</td><td>Répond à « que font les utilisateurs ? » (navigation + événements de valeur). Un website par app ; séparé de la mesure p99 qui, elle, vient des logs API.</td><td class="small">openbao, postgres</td><td class="small">deps : postgres<br>volumes : —<br>healthcheck : oui</td></tr>
+<tr data-id="core/temporal"><td><b>temporal</b><br><span class="muted">core</span></td><td><code>temporal.internal</code></td><td><code>docker.io/temporalio/auto-setup:1.29</code></td><td>7233→7233</td><td>Durable Execution · Saga orchestrée (compensation, timers, retries)</td><td>Pour les processus qui doivent survivre à un redémarrage, attendre des heures, ou attendre un humain. Un namespace par app. Complète le Stream Valkey, ne le remplace pas.</td><td class="small">postgres</td><td class="small">deps : postgres<br>volumes : —<br>healthcheck : oui</td></tr>
+<tr data-id="core/temporal-ui"><td><b>temporal-ui</b><br><span class="muted">core</span></td><td><code>temporal-ui.internal</code></td><td><code>docker.io/temporalio/ui:2.53.3</code></td><td>9233→8080</td><td>Console opérateur</td><td>Historique des runs, I/O de chaque activité, stack trace d&#x27;un workflow bloqué, replay manuel.</td><td class="small">temporal</td><td class="small">deps : temporal<br>volumes : —<br>healthcheck : —</td></tr>
+<tr data-id="core/valkey"><td><b>valkey</b><br><span class="muted">core</span></td><td><code>valkey.internal</code><br><span class="muted">alias : redis.internal</span></td><td><code>docker.io/valkey/valkey:9-alpine</code></td><td>6379→6379</td><td>Cache · Pub/Sub · Queue (Streams + consumer groups)</td><td>État partagé rapide et file de fan-out vers les workers. Préfixe &lt;app&gt;: par app. Alias redis.internal conservé → aucune app modifiée.</td><td class="small">—</td><td class="small">deps : —<br>volumes : valkey-data<br>healthcheck : oui</td></tr>
+<tr data-id="core/postgres"><td><b>postgres</b><br><span class="muted">core</span></td><td><code>postgres.internal</code></td><td><code>docker.io/pgvector/pgvector:pg17</code></td><td>5432→5432</td><td>Serveur partagé · Database-per-tenant (1 DB + 1 user par app)</td><td>Base relationnelle de toutes les apps, ET persistance de Temporal, Casdoor et Umami. pgvector disponible en opt-in pour le RAG.</td><td class="small">—</td><td class="small">deps : —<br>volumes : postgres-data<br>healthcheck : oui</td></tr>
+<tr data-id="core/s3"><td><b>s3</b><br><span class="muted">core</span></td><td><code>s3</code></td><td><code>docker.io/chrislusf/seaweedfs:4.44</code></td><td>9000→8333, 9001→8888</td><td>Object Storage modélisé en service externe · Valet Key (clé scopée par bucket)</td><td>Médias et assets. Volontairement sans alias .internal (comme un S3 cloud) : consommé via host.containers.internal:9000. Un bucket + une clé scopée par app.</td><td class="small">—</td><td class="small">deps : —<br>volumes : s3-data<br>healthcheck : oui</td></tr>
+<tr data-id="core/openbao"><td><b>openbao</b><br><span class="muted">core</span></td><td><code>openbao.internal</code><br><span class="muted">alias : vault.internal</span></td><td><code>docker.io/openbao/openbao:2.6</code></td><td>8200→8200</td><td>External Configuration Store · Secret Store centralisé</td><td>Aucun secret en clair dans les fichiers : chaque app lit secret/&lt;app&gt;/ au boot, les clés des services core y sont injectées au déploiement. Audit device déclaré dès le premier boot.</td><td class="small">—</td><td class="small">deps : —<br>volumes : openbao-logs, ./openbao/audit.hcl<br>healthcheck : oui</td></tr>
+<tr data-id="core/registry"><td><b>registry</b><br><span class="muted">core</span></td><td><code>registry.internal</code></td><td><code>docker.io/library/registry:2</code></td><td>5000→5000</td><td>Artifact Repository (build once, deploy many)</td><td>Registre OCI local : la CI pousse localhost:5000/&lt;app&gt;/&lt;service&gt;:&lt;tag&gt;, les composes des apps tirent de là.</td><td class="small">—</td><td class="small">deps : —<br>volumes : registry-data<br>healthcheck : oui</td></tr>
+<tr data-id="core/dozzle"><td><b>dozzle</b><br><span class="muted">core</span></td><td><code>dozzle.internal</code></td><td><code>docker.io/amir20/dozzle:latest</code></td><td>9999→8080</td><td>Log Aggregation (logs 12-factor sur stdout)</td><td>Les apps n&#x27;écrivent que sur stdout/stderr ; Dozzle lit le socket podman et agrège tout en temps réel, sans agent.</td><td class="small">podman.sock</td><td class="small">deps : —<br>volumes : ${XDG_RUNTIME_DIR<br>healthcheck : —</td></tr>
+</tbody></table></div>
+
+<h2>Patterns transverses</h2>
+<ul class="patterns">
+<li><b>Service discovery par DNS</b> — chaque service s'annonce en <code>&lt;service&gt;.internal</code> sur <code>core-network</code> ; aucune IP en dur.</li>
+<li><b>Alias de compatibilité</b> — <code>redis.internal</code>, <code>vault.internal</code>, <code>idp.internal</code> survivent aux remplacements Redis→Valkey, Vault→OpenBao, authentik→Casdoor : les apps ne voient pas le changement.</li>
+<li><b>Multi-tenant par isolation de ressource</b> — une ressource par app sur chaque brique : DB + user Postgres, bucket + clé S3, namespace Temporal, client OIDC, website Umami, clé virtuelle LLM, chemin <code>secret/&lt;app&gt;/</code>. La plateforme ne connaît aucune app par son nom.</li>
+<li><b>Backing services 12-factor</b> — config par variables d'environnement, logs sur stdout, health checks <code>/health</code> + <code>/ready</code>.</li>
+<li><b>Self-service</b> — chaque app se provisionne elle-même via son <code>bootstrap.sh</code> ; pas de ticket à l'équipe plateforme.</li>
+<li><b>100 % open source OSI</b> — pas d'open-core : d'où Valkey, OpenBao, SeaweedFS et Casdoor plutôt que Redis, Vault, MinIO et authentik.</li>
+</ul>
+
+<h2>Toutes les dépendances</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>De</th><th>Vers</th><th>Via</th><th>Source</th></tr></thead>
+<tbody>
+<tr><td>api</td><td>apisix</td><td>LLM · clé virtuelle</td><td>contrat</td></tr>
+<tr><td>api</td><td>casdoor</td><td>OIDC / JWKS</td><td>contrat</td></tr>
+<tr><td>api</td><td>openbao</td><td>openbao.internal:8200</td><td>dérivé</td></tr>
+<tr><td>api</td><td>postgres</td><td>postgres.internal</td><td>dérivé</td></tr>
+<tr><td>api</td><td>registry</td><td>pull image</td><td>dérivé</td></tr>
+<tr><td>api</td><td>s3</td><td>host.containers.internal:9000</td><td>dérivé</td></tr>
+<tr><td>api</td><td>temporal</td><td>workflows</td><td>contrat</td></tr>
+<tr><td>api</td><td>umami</td><td>beacon proxifié</td><td>contrat</td></tr>
+<tr><td>api</td><td>valkey</td><td>valkey.internal:6379</td><td>dérivé</td></tr>
+<tr><td>frontend</td><td>api</td><td>REST</td><td>contrat</td></tr>
+<tr><td>frontend</td><td>casdoor</td><td>login OIDC</td><td>contrat</td></tr>
+<tr><td>frontend</td><td>registry</td><td>pull image</td><td>dérivé</td></tr>
+<tr><td>worker</td><td>openbao</td><td>openbao.internal:8200</td><td>dérivé</td></tr>
+<tr><td>worker</td><td>postgres</td><td>postgres.internal</td><td>dérivé</td></tr>
+<tr><td>worker</td><td>registry</td><td>pull image</td><td>dérivé</td></tr>
+<tr><td>worker</td><td>s3</td><td>host.containers.internal:9000</td><td>dérivé</td></tr>
+<tr><td>worker</td><td>temporal</td><td>activités</td><td>contrat</td></tr>
+<tr><td>worker</td><td>valkey</td><td>valkey.internal:6379</td><td>dérivé</td></tr>
+<tr><td>apisix</td><td>openbao</td><td>clés injectées au déploiement</td><td>contrat</td></tr>
+<tr><td>apisix</td><td>OpenAI / Anthropic</td><td>vraie clé fournisseur</td><td>contrat</td></tr>
+<tr><td>casdoor</td><td>openbao</td><td>secrets au déploiement</td><td>contrat</td></tr>
+<tr><td>casdoor</td><td>postgres</td><td>depends_on · postgres.internal</td><td>dérivé</td></tr>
+<tr><td>dozzle</td><td>podman.sock</td><td>podman.sock (ro)</td><td>dérivé</td></tr>
+<tr><td>temporal</td><td>postgres</td><td>depends_on · postgres.internal</td><td>dérivé</td></tr>
+<tr><td>temporal-ui</td><td>temporal</td><td>depends_on · temporal.internal:7233</td><td>dérivé</td></tr>
+<tr><td>umami</td><td>openbao</td><td>secrets au déploiement</td><td>contrat</td></tr>
+<tr><td>umami</td><td>postgres</td><td>depends_on · postgres.internal:5432</td><td>dérivé</td></tr>
+</tbody></table></div>
+
+<footer>Généré par <code>docs/gen-architecture.py</code> — sortie déterministe. Entrées : podman-compose.yml sha256:985bb9406811 · templates/podman-compose.yml sha256:4b3065ede910</footer>
+</main>
+<script>
+(function () {
+  var svg = document.querySelector('.diagram svg');
+  var detail = document.getElementById('detail');
+  var info = {};
+  document.querySelectorAll('tbody tr[data-id]').forEach(function (tr) {
+    var c = tr.children;
+    info[tr.dataset.id] = { name: c[0].querySelector('b').textContent, pattern: c[4].textContent, why: c[5].textContent };
+  });
+  var current = null;
+  function select(id) {
+    current = (current === id) ? null : id;
+    svg.classList.toggle('focus', !!current);
+    svg.querySelectorAll('.node').forEach(function (n) { n.classList.remove('on', 'sel'); });
+    svg.querySelectorAll('.edge').forEach(function (e) { e.classList.remove('on'); });
+    document.querySelectorAll('tbody tr[data-id]').forEach(function (r) { r.classList.toggle('sel', r.dataset.id === current); });
+    if (!current) { detail.innerHTML = '<span class="muted">Sélectionnez un service dans le schéma ou le tableau.</span>'; return; }
+    var on = {}; on[current] = 1;
+    svg.querySelectorAll('.edge').forEach(function (e) {
+      if (e.dataset.s === current || e.dataset.d === current) { e.classList.add('on'); on[e.dataset.s] = 1; on[e.dataset.d] = 1; }
+    });
+    svg.querySelectorAll('.node').forEach(function (n) {
+      if (on[n.dataset.id]) n.classList.add('on');
+      if (n.dataset.id === current) n.classList.add('sel');
+    });
+    var i = info[current];
+    var g = svg.querySelector('.node[data-id="' + current + '"]');
+    if (i) {
+      detail.innerHTML = '<b></b> — <i></i><br><span></span>';
+      detail.querySelector('b').textContent = i.name;
+      detail.querySelector('i').textContent = i.pattern;
+      detail.querySelector('span').textContent = i.why;
+    } else {
+      detail.textContent = g.querySelector('.n-label').textContent + ' — ' + g.querySelector('title').textContent;
+    }
+  }
+  svg.querySelectorAll('.node').forEach(function (n) {
+    n.addEventListener('click', function () { select(n.dataset.id); });
+    n.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); select(n.dataset.id); } });
+  });
+  document.querySelectorAll('tbody tr[data-id]').forEach(function (tr) {
+    tr.style.cursor = 'pointer';
+    tr.addEventListener('click', function () { select(tr.dataset.id); });
+  });
+})();
+</script>
+</body>
+</html>

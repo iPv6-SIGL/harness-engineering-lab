@@ -1,0 +1,274 @@
+# .gitlab-ci.yml — an app pipeline skeleton (copy into the app's root).
+#
+# It takes up the core's pattern: an ACTION variable + strict rules per stage.
+# Serverless execution through gitlab-ci-local (see the core's requirements.md).
+#
+#   gitlab-ci-local --force-shell-executor                              # start
+#   gitlab-ci-local --force-shell-executor --variable ACTION=stop       # stop
+#   gitlab-ci-local --force-shell-executor --variable ACTION=purge      # purge
+#
+# The CCoE convention: **an explicit build here**, a Dockerfile
+# single-stage that only COPYs the artifacts. No Docker multistage.
+#
+# The template pattern: 3 templates (`.on-start`, `.bun-build`, `.podman-image`)
+# factor out the shared rules/stage/script. Adding a Bun service = 3 lines.
+# A Rust service (a hot-path waiver) uses the `.rust-build` template
+# commented out below.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# The single source of truth for the app's name: `variables: APP:` below.
+#
+# **On copying**: replace `myapp` on the `APP:` line with the app's name.
+# It is the ONLY line to edit — `podman-compose.yml` reads `${APP}` from the
+# shell env exported by gitlab-ci-local, so the value propagates on its own.
+#
+# A one-off override without editing (not advised, but useful for a test):
+#   gitlab-ci-local --force-shell-executor --variable APP=another-name
+#
+# ⚠️ `APP=foo gitlab-ci-local …` (a shell env var **before** the command) does
+# NOT work: the YAML's `variables:` win over the shell env.
+# Either edit the YAML, or pass `--variable APP=foo`.
+# ─────────────────────────────────────────────────────────────────────────
+
+stages:
+  - app-provision
+  - app-gates
+  - app-build
+  - app-image
+  - app-deploy
+  - app-verify
+  - app-stop
+  - app-purge
+
+variables:
+  APP: myapp                  # ← TO BE EDITED: the app's name (kebab-case)
+  TAG: dev
+  REGISTRY: localhost:5000     # always host-side — see the registry contract in README.md
+  PUBLIC_BUCKET: "0"           # 1 = the app's S3 bucket in anonymous public read
+  LLM_VKEY: "0"                # 1 = an agentic app: publish its LLM virtual key
+  TEMPORAL_NS: "0"             # 1 = durable workflows: create its Temporal namespace
+  ANALYTICS_SITE: "0"          # 1 = navigation tracking: create its Umami website
+  ACTION: start                # start | stop | purge (override via --variable)
+  # The app's port range (README.md → the ports convention: 10 contiguous ports in
+  # 8000-8999, canonical offsets). podman-compose.yml reads these three through
+  # `${…}`, so the range is set HERE and only here. Take a free block — 8080-8089
+  # is the reference demo's.
+  FRONTEND_PORT: "8000"        # +0  the frontend (nginx)
+  API_PORT: "8001"             # +1  the REST API
+  WORKER_HEALTH_PORT: "8008"   # +8  the worker's /health + /ready
+  # The secret store, reached through its own container — no host CLI assumed.
+  BAO_CONTAINER: openbao.internal
+
+# ============================================================================
+# Templates (hidden jobs — the `.` prefix makes them non-executed)
+# ============================================================================
+
+.on-start:
+  rules:
+    - if: $ACTION == "start"
+
+# The merge-request gates — one job per gate, blocking, BEFORE build-*.
+# Each one runs per service: list yours in SERVICES (drop the absent ones).
+.gate:
+  extends: .on-start
+  stage: app-gates
+  variables:
+    SERVICES: "frontend api worker"
+
+.bun-build:
+  extends: .on-start
+  stage: app-build
+  script:
+    - cd "$SERVICE"
+    - bun install --production    # Bun runs the TS — no compilation step
+
+# The hot-path waiver — a service in static musl Rust.
+# Uncomment it and put `extends: .rust-build` on the job concerned if needed:
+# .rust-build:
+#   extends: .on-start
+#   stage: app-build
+#   script:
+#     - . "$HOME/.cargo/env" 2>/dev/null || true
+#     - cd "$SERVICE"
+#     - rustup target add x86_64-unknown-linux-musl
+#     - cargo build --release --target x86_64-unknown-linux-musl
+
+.podman-image:
+  extends: .on-start
+  stage: app-image
+  script:
+    - podman build -t "$REGISTRY/$APP/$SERVICE:$TAG" "$SERVICE/"
+    - podman push   "$REGISTRY/$APP/$SERVICE:$TAG"
+
+# ============================================================================
+# ACTION=start
+# Remove the build-*/image-* jobs that do not match your app.
+# ============================================================================
+
+provision:
+  extends: .on-start
+  stage: app-provision
+  script:
+    - APP="$APP" PUBLIC_BUCKET="$PUBLIC_BUCKET" LLM_VKEY="$LLM_VKEY" TEMPORAL_NS="$TEMPORAL_NS" ANALYTICS_SITE="$ANALYTICS_SITE" ./bootstrap.sh
+
+# --- Gates (blocking) — the pipeline stops at the first red ---
+# They run AFTER provision on purpose: the integration tests hit the real core
+# services (no mocks) with the credentials bootstrap.sh just wrote.
+
+lint:
+  extends: .gate
+  script:
+    - bunx @biomejs/biome ci .                       # the shared core-platform/templates/biome.json
+    - |
+      for s in $SERVICES; do
+        (cd "$s" && bun install --frozen-lockfile && bunx tsc --noEmit) || exit 1
+      done
+
+test:
+  extends: .gate
+  script:
+    - |
+      for s in $SERVICES; do
+        (cd "$s" && bun install --frozen-lockfile && bun test) || exit 1
+      done
+
+audit:
+  extends: .gate
+  script:
+    # Blocking on high/critical; a vulnerability with no fix = a dated waiver.
+    - |
+      for s in $SERVICES; do
+        (cd "$s" && bun audit --audit-level=high) || exit 1
+      done
+
+secrets:
+  extends: .gate
+  script:
+    # A host gitleaks that ANSWERS, otherwise its container — no host CLI assumed.
+    # Any finding = a COMPROMISED secret: rotate it in the store.
+    - |
+      if gitleaks version >/dev/null 2>&1; then
+        gitleaks detect --source . --redact
+      else
+        podman run --rm -v "$PWD:/repo:Z" docker.io/zricethezav/gitleaks:v8.24.2 \
+          detect --source /repo --redact
+      fi
+
+# Agentic app: add an `evals` gate running worker/evals/.
+# App with screens: add an `a11y-i18n` gate (axe-core + catalogue completeness).
+
+# --- Build: an explicit compilation CI-side -------
+
+build-frontend:
+  extends: .on-start
+  stage: app-build
+  script:
+    - cd frontend
+    - bun install
+    - bun run build               # vite build (Bun as the package manager)
+
+build-api:
+  extends: .bun-build
+  variables: { SERVICE: api }
+
+build-worker:
+  extends: .bun-build
+  variables: { SERVICE: worker }
+  # A Rust waiver: replace it with `extends: .rust-build` (see the commented template).
+
+# --- Image: a single-stage Dockerfile (uniform through the template) -------
+
+image-frontend:
+  extends: .podman-image
+  variables: { SERVICE: frontend }
+
+image-api:
+  extends: .podman-image
+  variables: { SERVICE: api }
+
+image-worker:
+  extends: .podman-image
+  variables: { SERVICE: worker }
+
+# --- Deploy + verify --------------------------------------------------------
+
+deploy:
+  extends: .on-start
+  stage: app-deploy
+  script:
+    - echo "[deploy] podman compose -p $APP up -d --force-recreate"
+    # --force-recreate: guarantees we restart on the images we have just pushed,
+    # otherwise podman-compose falls back on `podman start` (the old binary).
+    - podman compose -p "$APP" up -d --force-recreate
+
+verify:
+  extends: .on-start
+  stage: app-verify
+  script:
+    - |
+      set -e
+      echo "[verify] smoke test $APP — readiness per exposed service"
+      # One URL per exposed service: /ready for the backends (it pings the
+      # DB/Valkey/store), / for the static frontend. Drop the absent services.
+      URLS="http://localhost:$FRONTEND_PORT/
+      http://localhost:$API_PORT/ready
+      http://localhost:$WORKER_HEALTH_PORT/ready"
+      ok=0
+      for _ in $(seq 1 60); do
+        ok=1
+        for u in $URLS; do curl -sf "$u" >/dev/null || { ok=0; break; }; done
+        [ "$ok" = "1" ] && break
+        sleep 1
+      done
+      if [ "$ok" != "1" ]; then
+        for u in $URLS; do curl -sf "$u" >/dev/null && echo "  OK    $u" || echo "  FAIL  $u"; done
+        echo "[verify] FAIL — not every service is ready after 60s"
+        exit 1
+      fi
+      for u in $URLS; do echo "  OK  $u"; done
+
+# ============================================================================
+# ACTION=stop: stops the containers, keeps the volumes + the secrets + the bucket
+# ============================================================================
+
+stop:
+  stage: app-stop
+  rules:
+    - if: $ACTION == "stop"
+  script:
+    - echo "[stop] podman compose -p $APP down"
+    - podman compose -p "$APP" down
+    - echo "[stop] the containers are down — the S3 bucket, the app secrets and the app volumes are preserved."
+
+# ============================================================================
+# ACTION=purge: destroys the app's runtime state, preserves the user data
+# ============================================================================
+# Removes :  the containers + the app volumes + EVERY app secret under secret/$APP/
+# Preserves:  the S3 bucket + its content (media)  +  the Postgres DB + its rows
+#
+# Regenerating after a purge: the next ACTION=start reruns ./bootstrap.sh
+# (postgres, objectstore; llm / temporal / analytics per their flags above); from core-platform/: ./idp/onboard-oidc.sh and
+# ./idp/seed-test-users.sh (oidc, test-users).
+#
+# For an exhaustive clean-up (including the user data):
+#   podman exec -i s3 sh -c "echo 's3.bucket.delete -name=<APP>' | weed shell -master=localhost:9333"
+#   podman exec postgres.internal psql -U postgres -c 'DROP DATABASE "<APP>"' -c 'DROP USER "<APP>"'
+
+purge:
+  stage: app-purge
+  rules:
+    - if: $ACTION == "purge"
+  variables:
+    # Every path the platform writes under secret/$APP/ — APPEND the app's own
+    # non-core secrets (third-party tokens, dataset credentials…), or they linger between runs.
+    APP_SECRETS: "postgres objectstore llm temporal analytics oidc test-users"
+  script:
+    - echo "[purge] podman compose -p $APP down --volumes"
+    - podman compose -p "$APP" down --volumes
+    - echo "[purge] removing the secrets of $APP"
+    - |
+      bao() { podman exec -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=root-dev-token "$BAO_CONTAINER" bao "$@"; }
+      for s in $APP_SECRETS; do
+        bao kv metadata delete "secret/$APP/$s" >/dev/null 2>&1 || true
+      done
+    - echo "[purge] done — the S3 bucket + the Postgres DB are kept (see the header for an explicit rm)"

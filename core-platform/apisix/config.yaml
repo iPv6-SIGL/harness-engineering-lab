@@ -1,0 +1,25 @@
+# APISIX — main config, mode STANDALONE (file/YAML driven, no etcd).
+#
+# The core `llm.internal` LLM gateway. In standalone data_plane,
+# APISIX reads its routes from conf/apisix.yaml (mounted next to this file) and
+# exposes NO Admin API — the whole config lives in the repository (versioned).
+#
+# Doc: https://apisix.apache.org/docs/apisix/deployment-modes/#standalone
+deployment:
+  role: data_plane
+  role_data_plane:
+    config_provider: yaml
+
+apisix:
+  node_listen: 9080            # a single traffic port (no Admin API in data_plane)
+  enable_admin: false
+  # The environment references (double braces) are interpolated from the
+  # container's environment at load time — the real OpenAI key and the virtual
+  # keys NEVER appear in the versioned files (injected through Vault at deploy
+  # time, see the CI).
+
+nginx_config:
+  # warn (not info): at the info level APISIX dumps the full route config, the
+  # virtual key and the provider key INCLUDED → a leak into the logs/Dozzle. To be
+  # kept at warn so as never to expose the secrets.
+  error_log_level: warn

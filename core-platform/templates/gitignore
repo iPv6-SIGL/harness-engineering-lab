@@ -1,0 +1,29 @@
+# Build artifacts to exclude from the app repository. Copy to the root of your app.
+
+# TypeScript + Bun (frontend Vite + api/worker Bun)
+node_modules/
+dist/
+build/
+# NB: bun.lock (a text lockfile) is TRACKED — do not ignore it.
+
+# Rust (only with a hot-path waiver — musl workers)
+target/
+**/*.rs.bk
+
+# The gitlab-ci-local runtime cache (per-job generated scripts)
+.gitlab-ci-local/
+
+# Local logs
+*.log
+
+# Secrets (rare, but just in case) — the real creds have to live in Vault
+.env
+.env.local
+*.local
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

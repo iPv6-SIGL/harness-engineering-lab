@@ -1,0 +1,226 @@
+# core-platform — the instantiation pipeline of the core stack (the ACTION variable + rules).
+# Serverless execution through gitlab-ci-local (see requirements.md).
+#
+#   gitlab-ci-local --force-shell-executor                              # start (the default)
+#   gitlab-ci-local --force-shell-executor --variable ACTION=stop       # stop
+#   gitlab-ci-local --force-shell-executor --variable ACTION=purge      # purge
+#
+# prepare-host runs ALWAYS (no rules:) — it guarantees the host state whatever the
+# action. The other jobs are strict on ACTION.
+
+stages:
+  - prepare
+  - core-platform-start
+  - core-platform-stop
+  - core-platform-purge
+
+variables:
+  ACTION: start
+
+# ============================================================================
+# prepare — always run
+# ============================================================================
+
+prepare-host:
+  stage: prepare
+  script:
+    - |
+      set -e
+      # The rootless Podman socket (mounted by dozzle to read the logs)
+      systemctl --user start podman.socket 2>/dev/null || true
+      # The HTTP registry exception localhost:5000 (insecure = true) — idempotent
+      REG_CONF="${HOME}/.config/containers/registries.conf"
+      mkdir -p "$(dirname "$REG_CONF")"
+      if ! grep -q 'localhost:5000' "$REG_CONF" 2>/dev/null; then
+        printf '\n[[registry]]\nlocation = "localhost:5000"\ninsecure = true\n' >> "$REG_CONF"
+        echo "[prepare-host] the insecure registry localhost:5000 was added"
+      else
+        echo "[prepare-host] the insecure registry is already configured"
+      fi
+
+# ============================================================================
+# ACTION=start
+# ============================================================================
+
+prepare-network:
+  stage: core-platform-start
+  rules:
+    - if: $ACTION == "start"
+  script:
+    - podman network create core-network 2>/dev/null || echo "[prepare-network] core-network is already present"
+
+# ── MIGRATION off the open-core services ─────────────────────────────────────
+# The stack used to run `redis.internal`, `vault.internal` and `minio`. Those
+# container NAMES are gone (the services are now valkey.internal, openbao.internal
+# and s3), so `podman compose down` — which works off the CURRENT compose file —
+# would leave them behind as orphans still holding 6379 / 8200 / 9000, and the
+# new containers would fail to publish their ports.
+#
+# Removing them here is safe and idempotent: they carry no state we want (the old
+# Vault was in-memory anyway), and their volumes are dropped by ACTION=purge.
+# Delete this job once every workstation has run a `start` at least once.
+migrate-legacy-services:
+  stage: core-platform-start
+  rules:
+    - if: $ACTION == "start"
+  script:
+    - |
+      for c in redis.internal vault.internal minio; do
+        if podman container exists "$c" 2>/dev/null; then
+          podman rm -f "$c" >/dev/null 2>&1 || true
+          echo "[migrate] the legacy container '$c' was removed (open-core → open source swap)"
+        fi
+      done
+
+compose-up:
+  stage: core-platform-start
+  needs: [prepare-network, migrate-legacy-services]
+  rules:
+    - if: $ACTION == "start"
+  script:
+    # bootstrap: the runtime apisix.yaml is generated from Vault by
+    # seed-llm-gateway (gitignored). On a fresh clone it does not exist yet — we
+    # lay down the base (the routes, with no consumers) so that the bind-mount has
+    # a valid file; seed-llm-gateway regenerates it with the consumers right after.
+    # The seeding: the compose's bind-mount requires the file to EXIST before the up
+    # (otherwise Podman creates a DIRECTORY in its place). The default provider =
+    # openai; seed-llm-gateway regenerates it right after with the provider persisted in Vault.
+    - '[ -f apisix/apisix.yaml ] || cp apisix/routes.openai.yaml apisix/apisix.yaml'
+    - podman compose -p core up -d
+
+# The object store: creates the platform-admin S3 identity. IT IS A
+# SECURITY STEP — SeaweedFS serves everything anonymously as long as no identity
+# exists, so this is what switches the gateway into authenticated mode. It runs
+# BEFORE seed-llm-gateway so that the store is never left open while the
+# (slower) gateway seeding happens.
+seed-object-store:
+  stage: core-platform-start
+  needs: [compose-up]
+  rules:
+    - if: $ACTION == "start"
+  script:
+    - ./objectstore/seed-admin.sh
+
+# Temporal: waits for the cluster and guarantees the `default`
+# namespace. It creates NO app namespace — an app creates its own from its
+# bootstrap (the platform stays agnostic).
+seed-temporal:
+  stage: core-platform-start
+  needs: [compose-up]
+  rules:
+    - if: $ACTION == "start"
+  script:
+    - ./temporal/seed-namespaces.sh
+
+# The identity provider: rotates the seed admin, mints the bootstrap
+# client, recreates the one casdoor container with the secrets in the env.
+seed-idp:
+  stage: core-platform-start
+  needs: [compose-up]
+  rules:
+    - if: $ACTION == "start"
+  script:
+    - ./idp/seed-and-deploy.sh
+
+# The LLM gateway: injects the real provider key + the virtual keys from
+# the secret store into APISIX (recreates the container with the secrets in the
+# env). The store is the source of truth; the secret can be seeded through the
+# OPENAI_API_KEY variable.
+seed-llm-gateway:
+  stage: core-platform-start
+  needs: [compose-up]
+  rules:
+    - if: $ACTION == "start"
+  script:
+    - ./apisix/seed-and-deploy.sh
+
+# Product analytics: creates the umami DB, generates/publishes the
+# secrets, recreates the container with them in the env, then rotates the
+# SHIPPED DEFAULT admin password (admin/umami) and caches an API token for
+# analytics/site-create.sh. Until this runs, port 9400 is an open admin.
+# AFTER seed-idp, not beside it: both recreate a container that depends on
+# postgres.internal, and podman-compose 1.0.x (Podman 4) restarts postgres on
+# every targeted recreate — two at once collide on the container name.
+seed-analytics:
+  stage: core-platform-start
+  needs: [compose-up, seed-idp]
+  rules:
+    - if: $ACTION == "start"
+  script:
+    - ./analytics/seed-and-deploy.sh
+
+verify:
+  stage: core-platform-start
+  needs: [seed-object-store, seed-temporal, seed-idp, seed-llm-gateway, seed-analytics]
+  rules:
+    - if: $ACTION == "start"
+  script:
+    - |
+      set -e
+      echo "[verify] waiting for the core services..."
+      ok=0
+      for _ in $(seq 1 60); do
+        if curl -sf http://localhost:8200/v1/sys/health  >/dev/null 2>&1 \
+           && curl -sf http://localhost:5000/v2/          >/dev/null 2>&1 \
+           && curl -sf http://localhost:9000/healthz     -o /dev/null >/dev/null 2>&1 \
+           && curl -s  http://localhost:9080/            -o /dev/null >/dev/null 2>&1 \
+           && curl -sf http://localhost:9233/            -o /dev/null >/dev/null 2>&1 \
+           && curl -sf http://localhost:9300/            -o /dev/null >/dev/null 2>&1 \
+           && curl -sf http://localhost:9400/api/heartbeat >/dev/null 2>&1 \
+           && podman exec valkey.internal valkey-cli ping >/dev/null 2>&1 \
+           && podman exec postgres.internal pg_isready -U postgres >/dev/null 2>&1 \
+           && podman exec temporal.internal sh -c 'temporal operator cluster health --address $(hostname -i):7233' 2>/dev/null | grep -q SERVING; then
+          ok=1; break
+        fi
+        sleep 2
+      done
+      if [ "$ok" != "1" ]; then
+        echo "[verify] FAIL — not all the services are ready after 120s"
+        podman ps --format '  {{.Names}}\t{{.Status}}'
+        exit 1
+      fi
+      # llm.internal: the protected route has to answer 401 with no virtual key
+      code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:9080/v1/chat/completions \
+               -H 'Content-Type: application/json' -d '{"model":"task:cheap","messages":[]}')
+      [ "$code" = "401" ] && echo "[verify] llm.internal: key-auth active (401 with no virtual key) ✓" \
+                          || echo "[verify] ⚠ llm.internal answered HTTP $code (expected 401)"
+      echo "[verify] core up :"
+      echo "  OpenBao   http://localhost:8200   (token root-dev-token) — alias vault.internal"
+      echo "  Registry  http://localhost:5000/v2/_catalog"
+      echo "  S3 API    http://localhost:9000   (platformadmin / platformadmin-dev-password)"
+      echo "  S3 browse http://localhost:9001   (SeaweedFS filer)"
+      echo "  Postgres  localhost:5432          (postgres / postgres-dev-password)"
+      echo "  Valkey    localhost:6379          — alias redis.internal"
+      echo "  Temporal  localhost:7233 (gRPC)   · UI http://localhost:9233"
+      echo "  IdP       http://localhost:9300   (casdoor — admin, creds in secret/core/idp)"
+      echo "  Analytics http://localhost:9400   (umami — admin, creds in secret/core/analytics)"
+      echo "  Dozzle    http://localhost:9999"
+      echo "  LLM gw    http://localhost:9080/v1 (llm.internal — alias task:* + virtual-key)"
+
+# ============================================================================
+# ACTION=stop: stops the containers, keeps the volumes + the network
+# ============================================================================
+
+stop:
+  stage: core-platform-stop
+  rules:
+    - if: $ACTION == "stop"
+  script:
+    - podman compose -p core down
+    - echo "[stop] the containers are stopped — the volumes and the network are kept"
+
+# ============================================================================
+# ACTION=purge: destroys everything (the containers + the volumes + the network)
+# ============================================================================
+
+purge:
+  stage: core-platform-purge
+  rules:
+    - if: $ACTION == "purge"
+  script:
+    - podman compose -p core down --volumes
+    # The legacy open-core containers/volumes, if a workstation still carries them.
+    - podman rm -f redis.internal vault.internal minio 2>/dev/null || true
+    - podman volume rm -f core_redis-data core_vault-data core_minio-data 2>/dev/null || true
+    - podman network rm core-network 2>/dev/null || true
+    - echo "[purge] the core is destroyed (the containers + the volumes + the network)"
