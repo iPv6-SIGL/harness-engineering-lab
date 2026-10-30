@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { archiveGaps, mergeSpec } from "../src/archive";
 import { checkBrief } from "../src/brief";
 import { buildGraph, corePlatformDir } from "../src/catalog";
 import { decide } from "../src/decide";
@@ -113,6 +114,30 @@ describe("guards (steps 7, prevent + detect)", () => {
     writeFileSync(join(app, "podman-compose.yml"), "services:\n  api: {}\n  worker: {}\n");
     writeFileSync(join(app, ".gitlab-ci.yml"), 'variables:\n  TEMPORAL_NS: "1"\n');
     expect(checkTopology(guards, app).map((v) => `${v.rule}:${v.match}`)).toEqual(["forbid_service:worker", "forbid_flag:TEMPORAL_NS=1"]);
+  });
+});
+
+describe("archive (step 15): decisions stay readable for the next change", () => {
+  const bill = needTest(brief(2), g);
+  const decisions = decide(brief(2), bill, g);
+  test("every decision says when to reopen it and how it scales; every bought brick is decided", () => {
+    for (const d of decisions) {
+      expect(d.revisit_when.length).toBeGreaterThan(20);
+      expect(d.scales_by.length).toBeGreaterThan(10);
+    }
+    expect(decisions[2].revisit_when).toContain("side effect");
+    expect(archiveGaps(decisions, ["D1", "D2", "D3", "D4"], ["casdoor", "s3"])).toEqual([]);
+  });
+  test("a decision without revisit_when, or an undecided brick, is not archivable", () => {
+    const broken = decisions.map((d) => (d.id === "D3" ? { ...d, revisit_when: "" } : d));
+    expect(archiveGaps(broken, ["D1", "D2", "D3", "D4", "D9"], ["casdoor", "s3", "registry"])).toEqual(["D3 has no revisit_when", "guard D9 has no decision", "bought brick registry is named by no decision"]);
+  });
+  test("the living spec merges deltas: same R-id replaced, new ones appended", () => {
+    const v1 = mergeSpec(null, "## ADDED Requirements\n\n### Requirement: R1 Book\n\nold\n\n### Requirement: R2 Login\n\nx\n", "app");
+    const v2 = mergeSpec(v1, "## ADDED Requirements\n\n### Requirement: R1 Book\n\nnew\n\n### Requirement: R6 Visitors\n\ny\n", "app");
+    expect(v2.match(/### Requirement: R\d/g)).toEqual(["### Requirement: R1", "### Requirement: R2", "### Requirement: R6"]);
+    expect(v2).toContain("new");
+    expect(v2).not.toContain("old");
   });
 });
 

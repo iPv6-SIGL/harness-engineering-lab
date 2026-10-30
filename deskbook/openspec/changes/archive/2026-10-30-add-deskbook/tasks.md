@@ -12,3 +12,4 @@ Done means the named scenario passes (the harness flips `.harness/ledger.json`),
 - [ ] 3.5 R5 · A booking can repeat every week until an end date chosen at booking, at most 26 weeks. — owner: builder · proves: `R5 weekly-until`, `R5 weekly-conflict`
 - [ ] 4.1 Screens: the persona journeys in frontend/ — owner: builder · proves: `C1 frontend`
 - [ ] 5.1 Contracts: /health, /ready, ports 8010–8011, SIGTERM < 10 s — owner: builder · proves: `C1 health`, `C1 ready`
+- [ ] 5.2 Stateless API: no state in the process — a session survives an API restart, so a second replica can serve it — owner: builder · proves: `C1 stateless`

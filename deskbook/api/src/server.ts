@@ -34,6 +34,9 @@ const fail = (status: number, code: string, message: string, details?: unknown) 
   json({ error: { code, message, ...(details ? { details } : {}) } }, status);
 
 // A per-client token bucket: 30 requests/s burst, refilled continuously.
+// The ONE piece of in-process state, on purpose: with N replicas the limit is
+// N × 30/s. A shared limiter needs Valkey, which D3 refuses — see the README's
+// structuring decisions for when that trade-off flips.
 const buckets = new Map<string, { tokens: number; at: number }>();
 function rateLimited(key: string): boolean {
   const now = Date.now();

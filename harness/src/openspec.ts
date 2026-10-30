@@ -23,6 +23,7 @@ export function planTasks(brief: Brief, bill: Bill): Task[] {
   }
   tasks.push({ id: "4.1", title: "Screens: the persona journeys in frontend/", owner: "builder", scenarios: ["C1 frontend"] });
   tasks.push({ id: "5.1", title: `Contracts: /health, /ready, ports ${brief.port_block}–${(brief.port_block ?? 8000) + 1}, SIGTERM < 10 s`, owner: "builder", scenarios: ["C1 health", "C1 ready"] });
+  tasks.push({ id: "5.2", title: "Stateless API: no state in the process — a session survives an API restart, so a second replica can serve it", owner: "builder", scenarios: ["C1 stateless"] });
   return tasks;
 }
 
@@ -50,7 +51,18 @@ export function designMd(brief: Brief, bill: Bill, decisions: Decision[], g: Gra
   l.push("", `**Total: ${bill.points} / ${bill.budget}** (${bill.class} budget)${bill.within_budget ? "" : " — **OVER BUDGET: needs a logged waiver and a human signal**"}. \\* price assumed.`, "");
   l.push("## Decisions", "");
   for (const d of decisions) {
-    l.push(`### ${d.id} · ${d.title}`, "", `- **Serves** ${d.serves.join(", ")}`, `- **Chose** ${d.chose}`, `- **Rejected** ${d.rejected}`, `- **Avoids** ${d.avoids}`, `- **Guard** \`.harness/guards/${d.id}.yaml\`${d.guard.witness.length ? ` · witness: ${d.guard.witness.map((w) => `${w.probe} ${w.expect}`).join(", ")}` : ""}`, "");
+    l.push(
+      `### ${d.id} · ${d.title}`,
+      "",
+      `- **Serves** ${d.serves.join(", ")}`,
+      `- **Chose** ${d.chose}`,
+      `- **Rejected** ${d.rejected}`,
+      `- **Avoids** ${d.avoids}`,
+      `- **Revisit when** ${d.revisit_when}`,
+      `- **Scales by** ${d.scales_by}`,
+      `- **Guard** \`.harness/guards/${d.id}.yaml\`${d.guard.witness.length ? ` · witness: ${d.guard.witness.map((w) => `${w.probe} ${w.expect}`).join(", ")}` : ""}`,
+      "",
+    );
   }
   l.push("## Refused, with the reason", "", "| Brick | Points | Why it stays out |", "|---|---|---|");
   for (const r of bill.refused) l.push(`| ${r.brick} | ${r.points} | ${r.reason}${r.rule ? ` (rule \`${r.rule}\`)` : ""} |`);

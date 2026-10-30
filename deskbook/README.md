@@ -74,9 +74,17 @@ web framework, a Postgres driver, an S3 SDK and a JWT library. Dev only:
 `typescript`, `@types/bun`.
 
 ## Structuring decisions
-- **D1–D4** — see `openspec/changes/add-deskbook/design.md` (identity through
-  casdoor; private S3 floor plans; no Valkey, worker or Temporal; nothing
-  unasked).
+- **D1–D4** — the decisions in force, each with what reopens it (**Revisit
+  when**) and how it scales (**Scales by**), live in
+  `openspec/specs/deskbook/decisions.md` once archived (the open change keeps
+  them in `openspec/changes/add-deskbook/design.md` until then).
+- **Stateless API** — bookings, sessions and login states are in Postgres,
+  files in S3; migrations run under an advisory lock. Proven by the `C1
+  stateless` scenario (a session survives a new API process). To add replicas:
+  drop `container_name` on `api` in the compose (the bill re-renders it) and
+  point nginx at the service name. Known limit: the rate limiter is per process
+  (N replicas → N × 30 req/s); a shared one needs Valkey, which D3 refuses —
+  revisit when one replica no longer carries the load.
 - **No Fastify** — context: the CCoE lists `@fastify/rate-limit`; choice:
   `Bun.serve` + a 20-line token bucket; consequence: zero runtime dependency,
   one less audit surface.

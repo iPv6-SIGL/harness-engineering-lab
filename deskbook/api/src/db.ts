@@ -1,6 +1,8 @@
 // db.ts — Postgres through Bun's built-in client. The schema is small enough to
 // migrate at boot, idempotently; the seed is the office layout of the brief
-// (about 200 desks on 3 floors, 2 rooms per floor).
+// (about 200 desks on 3 floors, 2 rooms per floor). Every piece of state —
+// bookings, sessions, login states — lives here, never in the API process:
+// any replica can serve any request.
 import { SQL } from "bun";
 import { type Booking, type Half, type Resource, seedLayout } from "./domain";
 
@@ -10,7 +12,15 @@ export function connect(url: string): Db {
   return new SQL({ url, max: 10, idleTimeout: 30 });
 }
 
-export async function migrate(sql: Db) {
+/** Idempotent, and safe when several replicas boot at once: one migrates, the others wait. */
+export async function migrate(pool: Db) {
+  await pool.begin(async (sql) => {
+    await sql`SELECT pg_advisory_xact_lock(hashtext('deskbook:migrate'))`;
+    await schema(sql);
+  });
+}
+
+async function schema(sql: Db) {
   await sql`CREATE TABLE IF NOT EXISTS resources (
     id serial PRIMARY KEY, floor int NOT NULL, kind text NOT NULL CHECK (kind IN ('desk','room')),
     label text NOT NULL UNIQUE, x int NOT NULL, y int NOT NULL, open boolean NOT NULL DEFAULT true)`;

@@ -33,9 +33,10 @@ step "evals: with vs without, every rule proven by a case (step 18)"
 expect_exit 0 "26 cases, ablation" $H evals
 echo "$LAST" | grep -E "ops points across|rules proven" | sed 's/^/  /'
 
-step "clean the run state (generated files only — the builder's code stays)"
-rm -rf "$APP_DIR/.harness" "$APP_DIR/openspec" "$APP_DIR/artifacts"
-ok "removed .harness/ openspec/ artifacts/"
+step "clean the run state (generated files only — the builder's code and the archived history stay)"
+SNAP="$(mktemp -d)"; [ -d "$APP_DIR/openspec" ] && cp -r "$APP_DIR/openspec" "$SNAP/"
+rm -rf "$APP_DIR/.harness" "$APP_DIR/openspec/changes/add-deskbook" "$APP_DIR/artifacts"
+ok "removed .harness/ artifacts/ and the open change (openspec/specs + changes/archive kept, snapshot in $SNAP)"
 
 step "brief loop: v1 is too thin (steps 1–4)"
 expect_exit 3 "brief-check v1 asks its questions" $H brief harness/briefs/deskbook.v1.yaml
@@ -95,7 +96,30 @@ expect_exit 0 "merge approved" $H approve "$APP_DIR" merge --by "${HARNESS_HUMAN
 expect_exit 0 "mine the runs" $H mine "$APP_DIR"
 echo "$LAST" | sed 's/^/  /'
 RUN="$(python3 -c 'import json;print(json.load(open("deskbook/.harness/ledger.json"))["run"])')"
-echo "  evidence pack: $APP_DIR/artifacts/$RUN/ — $(ls "$APP_DIR/artifacts/$RUN" | tr '\n' ' ')"
+
+step "archive (step 15): today's truth, the decision log, the evidence pack"
+APP=harness CORE_PLATFORM="$PWD/core-platform" core-platform/templates/bootstrap.sh >/dev/null 2>&1 \
+  && ok "the harness has its own bucket (APP=harness bootstrap)" || ko "harness bootstrap failed"
+expect_exit 0 "archive" $H archive "$APP_DIR"
+echo "$LAST" | sed 's/^/  /'
+LOG="$APP_DIR/openspec/specs/deskbook/decisions.md"
+for g in "$APP_DIR"/.harness/guards/D*.yaml; do
+  id="$(basename "$g" .yaml)"
+  awk -v id="$id" -v run="$RUN" '$0 ~ "^## .*" run {r=1} r && $0 ~ "^### " id " " {d=1} d && /Revisit when/ {v=1} d && /Scales by/ {s=1} END {exit !(v && s)}' "$LOG" \
+    && ok "$id archived with Revisit when + Scales by" || ko "$id missing from the decision log"
+done
+grep -q "^### Requirement: R5 " "$APP_DIR/openspec/specs/deskbook/spec.md" && ok "spec in force holds R1–R5" || ko "spec not merged"
+[ ! -d "$APP_DIR/openspec/changes/add-deskbook" ] && ok "open change moved to openspec/changes/archive/" || ko "change not moved"
+podman exec -i s3 sh -c "echo 's3.bucket.list' | weed shell -master=localhost:9333" 2>/dev/null | grep -q "^ *harness" \
+  && ok "evidence pack in s3://harness/deskbook/$RUN/" || ko "no harness bucket"
+expect_exit 2 "the builder cannot rewrite the archived log" hook "{\"cwd\":\"$PWD/$APP_DIR\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$PWD/$LOG\",\"old_string\":\"x\",\"new_string\":\"y\"}}"
+if [ "${E2E_ARCHIVE:-restore}" = "keep" ]; then
+  ok "E2E_ARCHIVE=keep: the archive stays (commit it)"
+else
+  rm -rf "$APP_DIR/openspec"; [ -d "$SNAP/openspec" ] && cp -r "$SNAP/openspec" "$APP_DIR/"
+  bun harness/src/cli.ts plan harness/briefs/deskbook.v2.yaml --app-dir "$APP_DIR" >/dev/null
+  ok "versioned openspec/ restored and the open change re-planned (E2E_ARCHIVE=keep to keep this run's archive)"
+fi
 
 printf "\n\033[1m%s\033[0m\n" "$([ $FAILS = 0 ] && echo "E2E GREEN — $STEP steps" || echo "E2E RED — $FAILS failure(s)")"
 exit $FAILS

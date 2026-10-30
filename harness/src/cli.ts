@@ -10,7 +10,8 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { join, resolve } from "node:path";
 import { checkBrief } from "./brief";
 import { buildGraph, HARNESS_DIR, loadHarnessConfig } from "./catalog";
-import { decide } from "./decide";
+import { archiveChange, archiveGaps, uploadEvidence } from "./archive";
+import { type Decision, decide } from "./decide";
 import { formatViolation, loadGuards, scanRepo } from "./guards";
 import { type Ledger, logEvent, newRunId, readLedger, runDir, sha, writeLedger } from "./ledger";
 import { mutate } from "./mutants";
@@ -91,6 +92,7 @@ function cmdPlan() {
   writeFileSync(join(change, "specs", brief.app, "spec.md"), specMd(brief));
   writeFileSync(join(appDir, ".harness", "bill.yaml"), y({ app: bill.app, class: bill.class, budget: bill.budget, total: bill.points, within_budget: bill.within_budget, scaffold: bill.scaffold, bought: bill.bought, refused: bill.refused, flags: bill.flags, needs: bill.needs }));
   for (const d of decisions) writeFileSync(join(appDir, ".harness", "guards", `${d.id}.yaml`), `# compiled from design.md ${d.id} — the builder reads it, never edits it\n${y(d.guard)}`);
+  writeFileSync(join(appDir, ".harness", "decisions.yaml"), `# the decision log, machine-readable — archived at step 15 into openspec/specs/${brief.app}/decisions.md\n${y(decisions)}`);
   const ledger: Ledger = { app: brief.app, run, prompt_hash: sha(brief.prompt), tasks: tasks.map((t) => ({ ...t, passes: false, tries: 0, status: "open" })), gates: { spec: { approved: false }, merge: { approved: false } } };
   writeLedger(appDir, ledger);
   writeScaffold(appDir, brief, bill, resolve(HARNESS_DIR, cfg.core_platform));
@@ -245,6 +247,24 @@ async function cmdReconcile() {
 }
 
 // ── learn ───────────────────────────────────────────────────────────────────
+/** Step 15: the merged change becomes today's truth; its decisions join the app's permanent log. */
+async function cmdArchive() {
+  const appDir = resolve(args[0]);
+  const l = readLedger(appDir);
+  if (!l.gates.merge.approved) die("step 14 gate: the merge is not approved — nothing is archived before a human says so");
+  const decisions = Bun.YAML.parse(readFileSync(join(appDir, ".harness", "decisions.yaml"), "utf8")) as Decision[];
+  const bill = Bun.YAML.parse(readFileSync(join(appDir, ".harness", "bill.yaml"), "utf8")) as any;
+  const gaps = archiveGaps(decisions, loadGuards(appDir).map((g) => g.id), bill.bought.map((b: { brick: string }) => b.brick));
+  if (gaps.length) die(`refused: decisions not archivable —\n${gaps.map((x) => `  ✗ ${x}`).join("\n")}`);
+  const dir = runDir(appDir, l.run);
+  const where = await uploadEvidence(l.app, l.run, dir);
+  const r = archiveChange({ appDir, app: l.app, run: l.run, approvedBy: l.gates.merge.by ?? "?", bill, decisions, runDir: dir });
+  logEvent(appDir, l.run, 15, "archive", { change: r.target, evidence: where });
+  const rel = (p: string) => p.replace(`${appDir}/`, "");
+  console.log(`archived ${l.run}:\n  spec in force   ${rel(r.specPath)}\n  decision log    ${rel(r.logPath)} (${decisions.length} decisions, each with revisit_when + scales_by)\n  change          ${rel(r.target)}/ (+ run/ decisions.jsonl, report.md, verdicts.json)\n  evidence pack   ${where}`);
+}
+
+// ── learn ───────────────────────────────────────────────────────────────────
 /** Step 16: read every run's evidence and propose doctrine changes (step 17 is the human's PR). */
 function cmdMine() {
   const appDir = resolve(args[0]);
@@ -290,6 +310,7 @@ const commands: Record<string, () => unknown> = {
   witness: () => cmdWitness(),
   mutants: () => cmdMutants(),
   reconcile: cmdReconcile,
+  archive: cmdArchive,
   mine: cmdMine,
   evals: cmdEvals,
   price: cmdPrice,

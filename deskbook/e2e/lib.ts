@@ -65,7 +65,11 @@ export async function call(
   body?: unknown,
   headers: Record<string, string> = {},
 ) {
-  const init: RequestInit = { method, headers: { ...(s ? { Cookie: s.cookie } : {}), ...headers } };
+  const init: RequestInit = {
+    method,
+    headers: { ...(s ? { Cookie: s.cookie } : {}), ...headers },
+    signal: AbortSignal.timeout(10_000), // a scenario fails, it never hangs
+  };
   if (body instanceof Uint8Array) init.body = body;
   else if (body !== undefined) {
     init.body = JSON.stringify(body);

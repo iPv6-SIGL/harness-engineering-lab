@@ -36,6 +36,21 @@ describe("contracts", () => {
     expect(to.origin).toBe("http://localhost:9300");
     expect(to.searchParams.get("redirect_uri")).toBe(`${BASE}/auth/callback`);
   });
+  test("C1 stateless", async () => {
+    // A brand-new API process (what a second replica is) must serve an existing session.
+    const s = await login("employee");
+    expect((await call(s, "GET", "/api/v1/me")).status).toBe(200);
+    expect(Bun.spawnSync(["podman", "restart", "-t", "10", `${APP}-api`]).exitCode).toBe(0);
+    // Wait through the user's path (nginx → API): the new process has a new IP,
+    // which nginx re-resolves (≈ 1 s of 502 while the network DNS catches up).
+    let me = await call(s, "GET", "/api/v1/me");
+    for (let i = 0; i < 40 && me.status >= 500; i++) {
+      await Bun.sleep(500);
+      me = await call(s, "GET", "/api/v1/me");
+    }
+    expect(me.status).toBe(200);
+    expect(me.body.user.name).toBe(`${APP}-test-employee`);
+  });
 });
 
 describe("R1 · one free desk per half-day", () => {

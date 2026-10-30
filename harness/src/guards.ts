@@ -9,7 +9,7 @@ import type { Guard } from "./decide";
 export type Violation = { guard: string; decision: string; rule: string; file: string; match: string };
 
 // Files the builder may never write: the desired state and the harness's own state.
-export const PROTECTED = [/^\.harness\//, /^openspec\/changes\/[^/]+\/(design|tasks|proposal)\.md$/, /^podman-compose\.yml$/, /^\.gitlab-ci\.yml$/, /^bootstrap\.sh$/, /^\.claude\/settings\.json$/];
+export const PROTECTED = [/^\.harness\//, /^openspec\/changes\/[^/]+\/(design|tasks|proposal)\.md$/, /^openspec\/(specs|changes\/archive)\//, /^podman-compose\.yml$/, /^\.gitlab-ci\.yml$/, /^bootstrap\.sh$/, /^\.claude\/settings\.json$/];
 
 const CODE = /\.(ts|tsx|js|mjs|cjs|html|conf|ya?ml|json|sh)$|(^|\/)Dockerfile$/;
 const SKIP_DIRS = new Set(["node_modules", ".harness", "openspec", "artifacts", ".git", ".gitlab-ci-local", ".claude", "e2e"]);
