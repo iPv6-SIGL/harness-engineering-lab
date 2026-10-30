@@ -1,0 +1,18 @@
+# harness.yaml — the knobs of a run. Everything else is derived.
+core_platform: ../core-platform
+
+stop_rules:
+  max_brief_rounds: 3          # then build with the stated defaults, listed in proposal.md
+  max_questions_per_round: 3
+  max_task_tries: 3            # three failures on one task → a human
+  run_token_budget: 400000     # per run, not per minute (enforced when an LLM drives the run)
+
+verify:
+  mutation_bar: 0.70           # killed / mutants on the files below
+  mutate: [api/src/domain.ts]  # the doctrine: business rules live in ONE pure module (doctrine/rules.md § D-PURE)
+  reviewer: cross-family       # the reviewer runs on the OTHER provider than the builder, via llm.internal
+  reviewer_when_no_key: human  # no provider key → the review is skipped and the human gate must say so
+
+gates:
+  spec: human                  # step 5 — the desired state is approved before any code
+  merge: human                 # step 14 — the reconciler's verdict is approved before merge

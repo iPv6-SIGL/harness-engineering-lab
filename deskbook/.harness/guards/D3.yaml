@@ -1,0 +1,36 @@
+# compiled from design.md D3 — the builder reads it, never edits it
+id: D3
+decision: "No Valkey, no worker, no Temporal"
+serves:
+  - R5
+owner: decide step · human-reviewed
+forbid_import:
+  - ioredis
+  - redis
+  - bullmq
+  - "@valkey/valkey-glide"
+  - bee-queue
+  - "@temporalio/client"
+  - "@temporalio/worker"
+  - "@temporalio/workflow"
+forbid_pattern:
+  - Bun\.RedisClient
+  - new RedisClient
+  - redis://
+  - valkey\.internal
+  - temporal\.internal
+  - "@temporalio/"
+forbid_env:
+  - REDIS_URL
+  - TEMPORAL_ADDRESS
+forbid_service:
+  - worker
+forbid_path:
+  - worker/
+forbid_flag:
+  - TEMPORAL_NS
+witness:
+  - probe: valkey-keys
+    expect: absent
+  - probe: temporal-namespace
+    expect: absent

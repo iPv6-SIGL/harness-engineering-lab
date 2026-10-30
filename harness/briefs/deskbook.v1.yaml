@@ -1,0 +1,41 @@
+# The DeskBook prompt, as brief-check receives it in round 1 (deliberately thin).
+app: deskbook
+version: 1
+port_block: 8010
+prompt: >
+  Build DeskBook: employees book a desk or a meeting room on the floor plan;
+  office managers upload floor plans and open or close rooms; a booking can
+  repeat every week.
+personas:
+  - {slug: employee, does: books a desk or a room for a half-day}
+  - {slug: office-manager, does: manages rooms and floor plans}
+requirements:
+  - id: R1
+    persona: employee
+    text: An employee books one free desk per half-day; a desk already taken is refused and two free desks nearby are offered.
+    scenarios:
+      - {id: desk-taken, when: an employee books a desk that is taken, then: the booking is refused and two free desks nearby are offered}
+  - id: R2
+    persona: employee
+    text: Employees sign in once with their company account; each persona only performs the actions of its role.
+    scenarios:
+      - {id: sso-login, when: an employee signs in through the company IdP, then: the app knows the employee and their role}
+  - id: R3
+    persona: office-manager
+    text: An office manager opens and closes meeting rooms; a closed room cannot be booked.
+    scenarios:
+      - {id: manager-closes-room, when: an office manager closes a room and an employee books it, then: the booking is refused}
+  - id: R4
+    text: Floor-plan images are uploaded for each floor.
+    scenarios:
+      - {id: upload-plan, when: a floor plan is uploaded, then: signed-in employees see it}
+  - id: R5
+    persona: employee
+    text: A booking can repeat every week.
+    scenarios:
+      - {id: weekly, when: an employee books every Monday, then: the desk is taken on the following Mondays}
+data:
+  - {entity: desks}
+  - {entity: meeting rooms}
+never:
+  - two bookings on the same desk and half-day

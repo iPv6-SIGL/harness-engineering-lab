@@ -66,7 +66,9 @@ if [ "$(jsonget "$FOUND" "d.get('data')")" != "None" ]; then
   # keep the redirect URI in sync — rerunning with a new one updates it
   # update-application REPLACES the record: send the one read back, with only the
   # redirect URI changed — a partial body would wipe the client id/secret.
-  UPDATED="$(python3 -c 'import json,sys;d=json.loads(sys.argv[1])["data"];d["redirectUris"]=[sys.argv[2]];print(json.dumps(d))' "$FOUND" "$REDIRECT")"
+  # ⚠ expireInHours: an application created without it gets 0 — every token is
+  #   issued ALREADY EXPIRED (exp == iat) and /api/userinfo refuses it. Healed here.
+  UPDATED="$(python3 -c 'import json,sys;d=json.loads(sys.argv[1])["data"];d["redirectUris"]=[sys.argv[2]];d["expireInHours"]=d.get("expireInHours") or 1;d["refreshExpireInHours"]=d.get("refreshExpireInHours") or 24;print(json.dumps(d))' "$FOUND" "$REDIRECT")"
   ak -X POST "$IDP_URL/api/update-application?id=admin/$APP" -d "$UPDATED" | api_ok \
     || { echo "[oidc] ✗ could not update the application '$APP'" >&2; exit 1; }
   echo "[oidc] the application '$APP' already exists — redirect URI refreshed"
@@ -75,7 +77,7 @@ else
   CREATED="$(ak -X POST "$IDP_URL/api/add-application" -d "{
     \"owner\": \"admin\", \"name\": \"$APP\", \"displayName\": \"$APP\",
     \"organization\": \"built-in\", \"grantTypes\": [\"authorization_code\"],
-    \"redirectUris\": [\"$REDIRECT\"]
+    \"redirectUris\": [\"$REDIRECT\"], \"expireInHours\": 1, \"refreshExpireInHours\": 24
   }")"
   api_ok <<<"$CREATED" || { echo "[oidc] ✗ could not create the application '$APP': $CREATED" >&2; exit 1; }
   echo "[oidc] the application '$APP' was created"

@@ -1,0 +1,70 @@
+app: deskbook
+class: crud
+budget: 10
+total: 9
+within_budget: true
+scaffold:
+  - openbao
+  - dozzle
+  - registry
+  - postgres
+  - frontend
+  - api
+bought:
+  - brick: s3
+    points: 1
+    paid_by:
+      - R4
+    needs:
+      - blob-storage
+  - brick: casdoor
+    points: 2
+    paid_by:
+      - R1
+      - R2
+      - R3
+      - R4
+      - R5
+    needs:
+      - identity
+refused:
+  - brick: valkey
+    points: 2
+    rule: V-read-time-recurrence
+    requirement: R5
+    reason: "R5: a recurrence with no side effect is a rule evaluated when someone reads it — no clock has to fire"
+    avoids: "a worker container, a stream to watch, a scheduler to keep alive"
+  - brick: apisix
+    points: 1
+    reason: no requirement emits a signal for it
+  - brick: temporal
+    points: 2
+    rule: V-read-time-recurrence-only
+    requirement: R5
+    reason: "R5: \"repeat every week until a date\" is data read at query time, not a process that waits"
+    avoids: "a Temporal namespace, a worker, a UI to operate"
+  - brick: temporal-ui
+    points: 1
+    rule: V-read-time-recurrence-only
+    requirement: R5
+    reason: "R5: \"repeat every week until a date\" is data read at query time, not a process that waits"
+    avoids: "a Temporal namespace, a worker, a UI to operate"
+  - brick: umami
+    points: 1
+    reason: "the crud profile predicts it, but no requirement cites it (product-metrics: the brief names a usage metric someone will read)"
+  - brick: worker
+    points: 2
+    rule: V-read-time-recurrence
+    requirement: R5
+    reason: "R5: a recurrence with no side effect is a rule evaluated when someone reads it — no clock has to fire"
+    avoids: "a worker container, a stream to watch, a scheduler to keep alive"
+flags: []
+needs:
+  identity:
+    - R1
+    - R2
+    - R3
+    - R4
+    - R5
+  blob-storage:
+    - R4

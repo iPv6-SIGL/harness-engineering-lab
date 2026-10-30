@@ -1,0 +1,20 @@
+# compiled from design.md D1 — the builder reads it, never edits it
+id: D1
+decision: Identity through casdoor (OIDC)
+serves:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+owner: decide step · human-reviewed
+forbid_import: []
+forbid_pattern: []
+forbid_env: []
+forbid_service: []
+forbid_path: []
+forbid_flag: []
+witness:
+  - probe: secret-read
+    expect: present
+    detail: secret/deskbook/oidc

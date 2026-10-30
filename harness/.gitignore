@@ -1,0 +1,3 @@
+node_modules/
+# regenerated at every run from the platform's files — never a hand-made copy
+catalog/graph.json

@@ -1,0 +1,145 @@
+# evals/cases.yaml — the six families of the deck plus the traps that make a
+# naive agent over-build. Each case states the bill a good CCoE architect
+# expects. `harness evals` runs the need test on each, compares it with a
+# naive "without the harness" baseline, then ablates every rule: a rule that
+# no eval misses is flagged as dead weight (the meta-rule of the doctrine).
+cases:
+  - name: deskbook (web app + SSO)
+    brief: ../briefs/deskbook.v2.yaml
+    # the decision log matters as much as the bill: D3 exists because R5 tempted async-work and durable-wait
+    expect: {class: crud, buy: [casdoor, s3], refuse: [valkey, worker, temporal, temporal-ui, apisix, umami], points: 9, vetoed: [async-work@R5, durable-wait@R5]}
+
+  - name: payslip-run (bulk jobs)
+    brief:
+      app: paysliprun
+      personas: [{slug: hr, does: uploads the monthly payroll CSV}]
+      requirements:
+        - {id: R1, persona: hr, text: "HR uploads one CSV for the month; the app renders one PDF payslip for each employee into storage.", volume: 5000}
+        - {id: R2, persona: hr, text: "HR sees the status of the run and the rows in error."}
+    expect: {class: jobs, buy: [casdoor, s3, valkey, worker], refuse: [temporal, apisix, umami]}
+
+  - name: gearup (long-running approval)
+    brief:
+      app: gearup
+      personas: [{slug: employee, does: asks for gear}, {slug: manager, does: approves}]
+      requirements:
+        - {id: R1, persona: employee, text: "An employee asks for a laptop; the manager has 3 days to approve, with a reminder after 2 days."}
+        - {id: R2, persona: manager, text: "When the supplier fails the order is cancelled and the budget refunded."}
+    expect: {class: process, buy: [casdoor, temporal, temporal-ui, worker], refuse: [valkey, apisix, s3]}
+
+  - name: askhr (RAG assistant)
+    brief:
+      app: askhr
+      personas: [{slug: employee, does: asks HR questions}]
+      requirements:
+        - {id: R1, persona: employee, text: "The assistant answers questions in one sentence from the HR policy PDFs and links the page it used."}
+        - {id: R2, text: "HR uploads the policy PDFs."}
+    expect: {class: rag, buy: [casdoor, apisix, s3], refuse: [valkey, worker, temporal], flags: [LLM_VKEY=1]}
+
+  - name: triagebot (AI agent that acts)
+    brief:
+      app: triagebot
+      personas: [{slug: support-agent, does: approves drafted replies}]
+      requirements:
+        - {id: R1, text: "Each new helpdesk ticket is triaged, finds similar solved tickets and gets a drafted reply."}
+        - {id: R2, persona: support-agent, text: "The drafted reply waits for a human approval before it is sent."}
+    expect: {class: agent, buy: [casdoor, apisix, temporal, temporal-ui, worker], refuse: [valkey, umami]}
+
+  - name: photoshelf (media)
+    brief:
+      app: photoshelf
+      personas: [{slug: marketing, does: uploads product photos}]
+      requirements:
+        - {id: R1, persona: marketing, text: "Marketing uploads raw product photos; each one is resized to WebP sizes.", volume: 200}
+        - {id: R2, text: "The resized images are served on a public URL for the shop pages."}
+    expect: {class: media, buy: [casdoor, s3, valkey, worker], refuse: [temporal, apisix], flags: [PUBLIC_BUCKET=1]}
+
+  # ── Traps ──────────────────────────────────────────────────────────────────
+  - name: "trap: a recurrence WITH a side effect needs a scheduler"
+    brief:
+      app: deskbook-digest
+      personas: [{slug: office-manager, does: reads the digest}]
+      requirements:
+        - {id: R1, persona: office-manager, text: "Every Monday morning, e-mail the office managers the list of the week's bookings."}
+    expect: {class: jobs, buy: [casdoor, valkey, worker], refuse: [temporal]}
+
+  - name: "trap: monthly bulk rendering is still bulk"
+    brief:
+      app: invoicer
+      personas: [{slug: finance, does: checks invoices}]
+      requirements:
+        - {id: R1, persona: finance, text: "Every month the app renders thousands of PDF invoices.", volume: 3000}
+    expect: {class: jobs, buy: [valkey, worker], refuse: [temporal]}
+
+  - name: "trap: an anonymous FAQ buys nothing"
+    brief:
+      app: faq
+      anonymous: true
+      personas: []
+      requirements:
+        - {id: R1, text: "Visitors read the questions and answers of the help center."}
+    expect: {class: crud, buy: [], refuse: [casdoor, s3, valkey, worker, temporal, apisix, umami], points: 6}
+
+  - name: "trap: a metric someone will read buys analytics"
+    brief:
+      app: deskbook-kpi
+      personas: [{slug: employee, does: books desks}]
+      requirements:
+        - {id: R1, persona: employee, text: "An employee books a desk for a half-day."}
+        - {id: R2, text: "Facilities track the weekly usage rate of each floor."}
+    expect: {class: crud, buy: [casdoor, umami], refuse: [valkey, worker, temporal]}
+
+  - name: "trap: what the platform cannot host"
+    brief:
+      app: localllm
+      personas: [{slug: researcher, does: runs models}]
+      requirements:
+        - {id: R1, persona: researcher, text: "Run Llama locally on our GPUs to summarise reports."}
+    expect: {unsupported: [U-local-llm]}
+
+  # ── Probes: one signal each, so every rule proves it earns its place ────────
+  - name: "probe S-upload: receipts are uploaded"
+    brief: {app: p1, personas: [{slug: employee, does: claims expenses}], requirements: [{id: R1, persona: employee, text: "An employee uploads the receipts of an expense claim."}]}
+    expect: {buy: [s3]}
+  - name: "probe S-file-kind: a scan kept per claim"
+    brief: {app: p2, personas: [{slug: employee, does: claims expenses}], requirements: [{id: R1, persona: employee, text: "Each claim keeps the PDF the supplier sent."}]}
+    expect: {buy: [s3]}
+  - name: "probe S-bulk: a newsletter to thousands"
+    brief: {app: p3, personas: [{slug: marketer, does: writes the newsletter}], requirements: [{id: R1, persona: marketer, text: "The marketer sends the newsletter to thousands of subscribers."}]}
+    expect: {class: jobs, buy: [valkey, worker]}
+  - name: "probe S-heavy: transcoding leaves the request"
+    brief: {app: p4, personas: [{slug: trainer, does: publishes videos}], requirements: [{id: R1, persona: trainer, text: "Each training video is transcoded for the web."}]}
+    expect: {class: jobs, buy: [valkey, worker]}
+  - name: "probe S-volume: no keyword, only the number"
+    brief: {app: p14, personas: [{slug: buyer, does: validates prices}], requirements: [{id: R1, persona: buyer, text: "A buyer validates the new price list and every price is recomputed.", volume: 5000}]}
+    expect: {class: jobs, buy: [valkey, worker]}
+  - name: "probe S-volume, below the threshold: 50 prices stay in the request"
+    brief: {app: p15, personas: [{slug: buyer, does: validates prices}], requirements: [{id: R1, persona: buyer, text: "A buyer validates the new price list and every price is recomputed.", volume: 50}]}
+    expect: {class: crud, refuse: [valkey, worker]}
+  - name: "probe S-import: a nightly catalogue refresh"
+    brief: {app: p5, personas: [{slug: buyer, does: manages the catalogue}], requirements: [{id: R1, persona: buyer, text: "A nightly job refreshes the product catalogue."}]}
+    expect: {class: jobs, buy: [valkey, worker]}
+  - name: "probe S-approval: a purchase needs a sign-off"
+    brief: {app: p6, personas: [{slug: manager, does: approves purchases}], requirements: [{id: R1, persona: manager, text: "A purchase request needs the manager's approval."}]}
+    expect: {class: process, buy: [temporal, worker]}
+  - name: "probe S-long-timer: a reminder before a deadline"
+    brief: {app: p7, personas: [{slug: owner, does: owns contracts}], requirements: [{id: R1, persona: owner, text: "The owner is reminded 30 days before the contract deadline."}]}
+    expect: {class: process, buy: [temporal, worker]}
+  - name: "probe S-compensate: a failed payment is refunded"
+    brief: {app: p8, personas: [{slug: traveller, does: books seats}], requirements: [{id: R1, persona: traveller, text: "When the payment fails after the seat is held, the seat is released and the card refunded."}]}
+    expect: {class: process, buy: [temporal, worker]}
+  - name: "probe S-wait-human: a contract waits for a person"
+    brief: {app: p9, personas: [{slug: lawyer, does: signs contracts}], requirements: [{id: R1, persona: lawyer, text: "The prepared contract waits for a human before it is signed."}]}
+    expect: {class: process, buy: [temporal, worker]}
+  - name: "probe S-genimage: generated backgrounds"
+    brief: {app: p10, personas: [{slug: marketer, does: edits product pages}], requirements: [{id: R1, persona: marketer, text: "Generate a background image for each product page."}]}
+    expect: {buy: [apisix], flags: [LLM_VKEY=1]}
+  - name: "probe U-firehose"
+    brief: {app: p11, personas: [], anonymous: true, requirements: [{id: R1, text: "Ingest 100k messages per second from the plant sensors."}]}
+    expect: {unsupported: [U-firehose]}
+  - name: "probe U-native-mobile"
+    brief: {app: p12, personas: [], anonymous: true, requirements: [{id: R1, text: "Ship a native iOS app to the field technicians."}]}
+    expect: {unsupported: [U-native-mobile]}
+  - name: "probe U-regulated"
+    brief: {app: p13, personas: [], anonymous: true, requirements: [{id: R1, text: "Store the patient records of the clinic."}]}
+    expect: {unsupported: [U-regulated]}

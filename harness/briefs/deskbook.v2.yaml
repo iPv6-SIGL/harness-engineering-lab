@@ -1,0 +1,61 @@
+# The DeskBook brief after the brief loop (round 2): the user's answers are in.
+app: deskbook
+version: 2
+port_block: 8010
+prompt: >
+  Build DeskBook: employees book a desk or a meeting room on the floor plan;
+  office managers upload floor plans and open or close rooms; a booking can
+  repeat every week.
+personas:
+  - {slug: employee, does: books a desk or a room for a half-day}
+  - {slug: office-manager, does: "opens and closes rooms, uploads floor plans; also books like an employee"}
+requirements:
+  - id: R1
+    persona: employee
+    text: An employee books one free desk per half-day; a desk already taken is refused and two free desks nearby are offered.
+    scenarios:
+      - {id: desk-taken, when: an employee books a desk that is taken, then: the booking is refused and two free desks nearby on the same floor are offered}
+      - {id: one-per-half-day, when: an employee who already holds a desk books a second one for the same half-day, then: the booking is refused}
+      - {id: no-double-booking, when: two employees book the same free desk at the same instant, then: exactly one booking is accepted}
+  - id: R2
+    persona: employee
+    text: Employees sign in once with their company account; each persona only performs the actions of its role.
+    scenarios:
+      - {id: sso-login, when: an employee signs in through the company IdP, then: the app knows the employee and their role}
+      - {id: anonymous-refused, when: someone calls the API without signing in, then: the API answers 401 in the error envelope}
+  - id: R3
+    persona: office-manager
+    text: An office manager opens and closes meeting rooms; a closed room cannot be booked.
+    scenarios:
+      - {id: manager-closes-room, when: an office manager closes a room and an employee books it, then: the booking is refused}
+      - {id: employee-cannot-close, when: an employee tries to close a room, then: the API answers 403}
+  - id: R4
+    persona: office-manager
+    text: An office manager uploads a floor-plan image for a floor; plans stay visible to signed-in employees only.
+    scenarios:
+      - {id: upload-plan, when: an office manager uploads a floor plan, then: a signed-in employee downloads the same bytes}
+      - {id: plan-private, when: an employee uploads a plan or an anonymous browser reads the bucket, then: both are refused}
+  - id: R5
+    persona: employee
+    text: A booking can repeat every week until an end date chosen at booking, at most 26 weeks.
+    scenarios:
+      - {id: weekly-until, when: an employee books a desk every week until a date, then: the desk is taken on each of those weeks and free after the end date}
+      - {id: weekly-conflict, when: another employee books that desk on one of the repeated weeks, then: the booking is refused}
+data:
+  - {entity: desks, volume: about 200 desks on 3 floors}
+  - {entity: meeting rooms, volume: 2 per floor}
+  - {entity: bookings, volume: about 400 a day}
+  - {entity: floor plans, volume: 1 per floor, size: "up to 2 MB, PNG or SVG"}
+never:
+  - two bookings on the same desk and half-day
+  - an employee holding two desks on the same half-day
+  - a floor plan readable without signing in
+out_of_scope:
+  - payments and charge-back
+  - a native mobile app
+  - e-mail or chat notifications
+  - visitor badges
+answers:
+  R5-horizon: until an end date chosen at booking, at most 26 weeks
+  R4-uploader: office managers only
+  data-desks-volume: about 200 desks on 3 floors

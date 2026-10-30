@@ -1,0 +1,5 @@
+node_modules/
+.gitlab-ci-local/
+# the evidence packs live outside Git (archived to S3 at step 15)
+artifacts/
+.env
