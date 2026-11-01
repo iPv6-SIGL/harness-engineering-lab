@@ -64,7 +64,15 @@ app name to it. A new compose service must be priced in
 
 A PreToolUse hook (`harness/hooks/guard.ts`) refuses these edits and any edit
 that breaks a decision (e.g. importing `ioredis` when D3 says "No Valkey"). When
-it refuses, it quotes the decision: respect it, do not work around it.
+it refuses, it quotes the decision: respect it, do not work around it. It is
+wired at the repo root (`.claude/settings.json`) and in each app, so it applies
+whether you opened the repo or an app folder. It needs `bun` on the PATH: run
+your agent inside WSL/Linux. Where it cannot run, the CI `fitness` gate still
+catches the violation before the merge.
+
+**After a reboot** nothing is running and the dev secret store is empty: run
+`./up.sh` before anything else. Briefs may be written in French or English —
+the criteria read both (`harness evals` proves it).
 
 ## Where the truth lives
 
@@ -81,7 +89,8 @@ it refuses, it quotes the decision: respect it, do not work around it.
 ## Commands (run in WSL Ubuntu, `export PATH=$HOME/.bun/bin:$PATH`)
 
 ```bash
-cd core-platform && gitlab-ci-local --force-shell-executor   # the platform must be up first
+./up.sh                                                       # the whole lab up — fresh clone, after a stop or a reboot
+cd core-platform && gitlab-ci-local --force-shell-executor   # the platform alone
 bun harness/src/cli.ts <graph|brief|plan|approve|verify-task|fitness|reconcile|archive|mine|evals>
 cd harness && bun test test/ && bunx tsc --noEmit             # the harness's own tests
 bash harness/e2e/run.sh                                       # everything, end to end

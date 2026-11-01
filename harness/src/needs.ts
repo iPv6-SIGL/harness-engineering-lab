@@ -51,7 +51,30 @@ export type Bill = {
   provider_constraints: string[];
 };
 
-const rx = (s: string) => new RegExp(s, "i");
+// JavaScript's \b only knows ASCII letters: `santé\b` never matches "santé ".
+// Every criterion is compiled with a Unicode-aware word boundary instead, so a
+// French brief is read as well as an English one.
+const WORD = "\\p{L}\\p{N}_";
+const BOUNDARY = `(?:(?<=[${WORD}])(?![${WORD}])|(?<![${WORD}])(?=[${WORD}]))`;
+export function rx(source: string): RegExp {
+  let out = "";
+  let inClass = false;
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    if (c === "\\") {
+      const n = source[i + 1];
+      if (n === "w") out += inClass ? WORD : `[${WORD}]`;
+      else if (n === "b" && !inClass) out += BOUNDARY;
+      else out += c + n;
+      i++;
+      continue;
+    }
+    if (c === "[") inClass = true;
+    if (c === "]") inClass = false;
+    out += c;
+  }
+  return new RegExp(out, "iu");
+}
 
 function signalHits(need: Need, needId: string, r: Requirement, g: Graph): Hit[] {
   const hits: Hit[] = [];

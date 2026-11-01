@@ -16,7 +16,10 @@ export function planTasks(brief: Brief, bill: Bill): Task[] {
   if (bill.needs.identity) {
     tasks.push({ id: "1.2", title: `OIDC client + ${brief.personas.length} test personas (${brief.personas.map((p) => p.slug).join(", ")})`, owner: "harness", scenarios: ["C1 oidc"] });
   }
-  tasks.push({ id: "2.1", title: "Data model and seed (migrations in api/src/db.ts)", owner: "builder", scenarios: ["C1 ready"] });
+  // A data model is proven by the first business scenario that reads and writes it, not by /ready.
+  const first = brief.requirements.find((r) => (r.scenarios ?? []).length);
+  const dataProof = first ? `${first.id} ${first.scenarios![0].id}` : "C1 ready";
+  tasks.push({ id: "2.1", title: "Data model and seed (migrations in api/src/db.ts)", owner: "builder", scenarios: [dataProof] });
   let n = 1;
   for (const r of brief.requirements) {
     tasks.push({ id: `3.${n++}`, title: `${r.id} · ${r.text}`, owner: "builder", requirement: r.id, scenarios: (r.scenarios ?? []).map((s) => `${r.id} ${s.id}`) });

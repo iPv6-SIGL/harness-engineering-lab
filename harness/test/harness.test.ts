@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { archiveGaps, mergeSpec } from "../src/archive";
@@ -8,8 +8,8 @@ import { buildGraph, corePlatformDir } from "../src/catalog";
 import { decide } from "../src/decide";
 import { checkCommand, checkContent, checkTopology } from "../src/guards";
 import { sites } from "../src/mutants";
-import { type Brief, needTest } from "../src/needs";
-import { composeYml, gitlabCiYml } from "../src/scaffold";
+import { type Brief, needTest, rx } from "../src/needs";
+import { composeYml, gitlabCiYml, portBlock } from "../src/scaffold";
 
 const HERE = import.meta.dir;
 const g = buildGraph();
@@ -138,6 +138,34 @@ describe("archive (step 15): decisions stay readable for the next change", () =>
     expect(v2.match(/### Requirement: R\d/g)).toEqual(["### Requirement: R1", "### Requirement: R2", "### Requirement: R6"]);
     expect(v2).toContain("new");
     expect(v2).not.toContain("old");
+  });
+});
+
+describe("ports and French briefs (audit findings)", () => {
+  test("a port block already used by a sibling app is refused; none requested → the first free one", () => {
+    const root = mkdtempSync(join(tmpdir(), "apps-"));
+    for (const [app, port] of [["a", 8000], ["b", 8010]] as const) {
+      mkdirSync(join(root, app));
+      writeFileSync(join(root, app, ".gitlab-ci.yml"), `variables:\n  FRONTEND_PORT: "${port}"\n`);
+    }
+    const app = join(root, "c");
+    expect(() => portBlock(app, 8010)).toThrow(/already b's/);
+    expect(() => portBlock(app, 8015)).toThrow(/multiple of 10/);
+    expect(portBlock(app)).toBe(8020);
+    expect(portBlock(join(root, "b"), 8010)).toBe(8010); // an app keeps its own block on re-plan
+  });
+  test("accented words are whole words: the French brief is read like the English one", () => {
+    expect(rx("\\bsanté\\b").test("les données de santé des patients")).toBe(true);
+    expect(rx("\\b(upload\\w*|téléverse\\w*)\\b").test("les responsables téléversent")).toBe(true);
+    expect(rx("\\bsanté\\b").test("santéx")).toBe(false);
+    expect(rx("([\\w-]+ ){0,3}x").test("a-b c x")).toBe(true);
+  });
+  test("the hook checks a command run from the repo root against the app it names", () => {
+    const repo = resolve(HERE, "../..");
+    const r = Bun.spawnSync(["bun", join(HERE, "../hooks/guard.ts")], { stdin: Buffer.from(JSON.stringify({ cwd: repo, tool_name: "Bash", tool_input: { command: "cd deskbook/api && bun add ioredis" } })), stderr: "pipe" });
+    expect(r.exitCode).toBe(2);
+    const ok = Bun.spawnSync(["bun", join(HERE, "../hooks/guard.ts")], { stdin: Buffer.from(JSON.stringify({ cwd: repo, tool_name: "Bash", tool_input: { command: "cd harness && bun add zod" } })) });
+    expect(ok.exitCode).toBe(0);
   });
 });
 

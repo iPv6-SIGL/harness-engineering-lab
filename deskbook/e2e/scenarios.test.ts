@@ -158,6 +158,7 @@ describe("R4 · private floor plans", () => {
     expect(up.status).toBe(201);
     const res = await fetch(`${BASE}/api/v1/floors/2/plan`, { headers: { Cookie: emp.cookie } });
     expect(res.status).toBe(200);
+    expect(res.headers.get("content-security-policy")).toContain("sandbox");
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(png);
   });
   test("R4 plan-private", async () => {

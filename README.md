@@ -96,7 +96,7 @@ flowchart LR
     <tr><td>11</td><td>The platform as witness: audit log, Valkey keys, bucket ACL, namespaces, vkeys</td><td><code>harness/src/witness.ts</code></td></tr>
     <tr><td>12</td><td>Reviewer on the other model family, through <code>llm.internal</code></td><td><code>harness/src/review.ts</code></td></tr>
     <tr><td>15</td><td>Archive: spec in force, cumulative decision log, evidence pack to S3</td><td><code>harness/src/archive.ts</code></td></tr>
-    <tr><td>18</td><td>26 eval cases, with vs without, rule-by-rule ablation</td><td><code>harness/evals/</code></td></tr>
+    <tr><td>18</td><td>31 eval cases (English and French), with vs without, rule-by-rule ablation</td><td><code>harness/evals/</code></td></tr>
   </tbody>
 </table>
 </details>
@@ -106,8 +106,8 @@ flowchart LR
 <p>Prerequisites: WSL2 Ubuntu (or Linux) with Podman ≥ 4, <code>podman compose</code>, Node ≥ 20 + <code>gitlab-ci-local</code>, Bun ≥ 1.1 — check with <code>core-platform/preflight.sh</code>.</p>
 
 ```bash
-cd core-platform && gitlab-ci-local --force-shell-executor   # 1. the platform (≈ 2 min)
-cd .. && bash harness/e2e/run.sh                             # 2. the whole harness run, end to end
+./up.sh                     # 1. the platform + every app (≈ 3 min) — also THE command after a reboot
+bash harness/e2e/run.sh     # 2. the whole harness run, end to end
 ```
 
 <p>The end-to-end run plans DeskBook from its brief, deploys it, runs its scenarios as seeded personas, injects a drift to prove the guards catch it, reconciles to green, archives the decisions — and prints <code>E2E GREEN</code>.</p>

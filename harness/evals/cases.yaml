@@ -143,3 +143,26 @@ cases:
   - name: "probe U-regulated"
     brief: {app: p13, personas: [], anonymous: true, requirements: [{id: R1, text: "Store the patient records of the clinic."}]}
     expect: {unsupported: [U-regulated]}
+
+  # ── French: SIGL briefs are written in French; the same brief must give the same bill ──
+  - name: "fr: DeskBook in French gives the same 9 / 10 bill"
+    brief:
+      app: deskbook-fr
+      personas: [{slug: employe, does: réserve un bureau}, {slug: responsable, does: gère les salles et les plans}]
+      requirements:
+        - {id: R1, persona: employe, text: "Un employé réserve un bureau libre par demi-journée ; un bureau déjà pris est refusé et deux bureaux libres proches sont proposés."}
+        - {id: R4, persona: responsable, text: "Un responsable téléverse l'image du plan d'étage ; les plans restent visibles des seuls employés connectés."}
+        - {id: R5, persona: employe, text: "Une réservation peut se répéter chaque semaine jusqu'à une date de fin choisie, 26 semaines au plus."}
+    expect: {class: crud, buy: [casdoor, s3], refuse: [valkey, worker, temporal, temporal-ui, apisix, umami], points: 9, vetoed: [async-work@R5, durable-wait@R5]}
+  - name: "fr: une validation par le manager est un processus durable"
+    brief: {app: fr2, personas: [{slug: manager, does: valide}], requirements: [{id: R1, persona: manager, text: "Le manager valide la demande d'achat."}]}
+    expect: {class: process, buy: [temporal, worker]}
+  - name: "fr: répondre à partir des documents RH, c'est du RAG"
+    brief: {app: fr3, personas: [{slug: employe, does: pose des questions}], requirements: [{id: R1, persona: employe, text: "L'assistant répond aux questions à partir des politiques RH."}]}
+    expect: {class: rag, buy: [apisix]}
+  - name: "fr: un envoi chaque lundi demande un worker"
+    brief: {app: fr4, personas: [{slug: responsable, does: lit la liste}], requirements: [{id: R1, persona: responsable, text: "Chaque lundi, envoie par e-mail la liste des réservations aux responsables."}]}
+    expect: {class: jobs, buy: [valkey, worker], refuse: [temporal]}
+  - name: "fr: les données de santé sont refusées"
+    brief: {app: fr5, personas: [], anonymous: true, requirements: [{id: R1, text: "Stocker les données de santé des patients de la clinique."}]}
+    expect: {unsupported: [U-regulated]}

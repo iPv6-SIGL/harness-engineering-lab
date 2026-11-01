@@ -5,7 +5,7 @@
 // with exit 2: the reason goes back to the agent, quoting the decision it breaks.
 //
 // Wired by `harness plan` in <app>/.claude/settings.json.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { checkCommand, checkContent, findAppRoot, formatViolation, loadGuards, PROTECTED, type Violation } from "../src/guards";
 
@@ -24,9 +24,16 @@ function refuse(violations: Violation[], extra = "") {
 }
 
 if (tool === "Bash") {
+  const command = String(ti.command ?? "");
+  // Inside an app: its guards. At the repo root: the guards of every app the command names
+  // (`cd deskbook && bun add ioredis` must not slip through because the agent stood one level up).
   const root = findAppRoot(cwd);
-  if (!root) process.exit(0);
-  const v = checkCommand(loadGuards(root), String(ti.command ?? ""));
+  const apps = root
+    ? [root]
+    : readdirSync(cwd, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && existsSync(join(cwd, d.name, ".harness", "guards")) && new RegExp(`(^|[\\s/"'])${d.name}([\\s/"']|$)`).test(command))
+        .map((d) => join(cwd, d.name));
+  const v = apps.flatMap((a) => checkCommand(loadGuards(a), command));
   if (v.length) refuse(v);
   process.exit(0);
 }

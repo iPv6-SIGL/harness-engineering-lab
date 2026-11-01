@@ -18,7 +18,7 @@ import { mutate } from "./mutants";
 import { type Brief, needTest } from "./needs";
 import { designMd, planTasks, proposalMd, specMd, tasksMd } from "./openspec";
 import { review } from "./review";
-import { writeScaffold } from "./scaffold";
+import { portBlock, writeScaffold } from "./scaffold";
 import { witness } from "./witness";
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -67,6 +67,11 @@ function cmdPlan() {
   const briefPath = resolve(args[0]);
   const appDir = resolve(flag("app-dir") ?? die("--app-dir is required"));
   const brief = readBrief(briefPath);
+  try {
+    brief.port_block = portBlock(appDir, brief.port_block);
+  } catch (e) {
+    die(String((e as Error).message));
+  }
   const run = newRunId();
   mkdirSync(join(appDir, ".harness", "guards"), { recursive: true });
   const g = buildGraph();

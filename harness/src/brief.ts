@@ -3,7 +3,7 @@
 // or a requirement (each question names what it `affects`). A gap fixed in the
 // brief costs no code.
 import type { Graph } from "./catalog";
-import { type Brief, needTest } from "./needs";
+import { type Brief, needTest, rx } from "./needs";
 
 export type Question = { id: string; ask: string; why: string; affects: string; default: string };
 export type BriefCheck = {
@@ -14,9 +14,10 @@ export type BriefCheck = {
   defaults_applied: Question[];
 };
 
-const RECURRENCE = /\b(every (week|day|month|monday|tuesday|wednesday|thursday|friday)|weekly|daily|monthly|repeat(s|ing)?|recurring)\b/i;
-const HORIZON = /\b(until|end date|for \d+ (weeks|months)|jusqu)/i;
-const UPLOAD = /\b(upload\w*|téléverse\w*)\b/i;
+// Through rx(): Unicode word boundaries, so the French forms match too.
+const RECURRENCE = rx("\\b(every (week|day|month|monday|tuesday|wednesday|thursday|friday)|weekly|daily|monthly|repeat(s|ing)?|recurring|chaque (jour|semaine|mois|lundi|mardi|mercredi|jeudi|vendredi)|hebdomadaire|répét\\w*|récurren\\w*)\\b");
+const HORIZON = rx("\\b(until|end date|for \\d+ (weeks|months)|jusqu|date de fin|pendant \\d+ (semaines|mois))");
+const UPLOAD = rx("\\b(upload\\w*|téléverse\\w*)\\b");
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
 export function checkBrief(brief: Brief, g: Graph, round = 1, maxRounds = 3, maxQuestions = 3): BriefCheck {

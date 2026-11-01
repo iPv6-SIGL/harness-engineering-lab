@@ -174,6 +174,9 @@ async function getPlan(req: Request, floor: number): Promise<Response> {
     headers: {
       "Content-Type": f.type || "application/octet-stream",
       "Cache-Control": "private, no-cache",
+      // An uploaded SVG is served same-origin: it may never run a script or be sniffed as HTML.
+      "Content-Security-Policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'",
+      "X-Content-Type-Options": "nosniff",
     },
   });
 }

@@ -48,7 +48,7 @@ Thresholds (`latency_budget_ms: 350`, `durable_wait_s: 30`, `fanout_units: 100`,
 (what the app team runs for the life of the app); budgets per class live in
 `catalog/budgets.yaml` (crud 10 · jobs 16 · media/rag/process 17 · agent 18).
 
-**Every rule is proven by an eval.** `harness evals` runs 26 cases (the six
+**Every rule is proven by an eval.** `harness evals` runs 31 cases (the six
 families, traps, one probe per signal), compares each bill with a naive agent
 (family profile + every keyword, no veto), then switches each of the 25 rules
 off in turn: a rule no case misses fails the run.

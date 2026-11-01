@@ -34,15 +34,15 @@ needs:
   blob-storage:
     why: binary files (images, PDFs, scans) do not belong in table rows
     signals:
-      - {id: S-upload, re: '\b(upload|uploads|uploaded|téléverse|dépose)\b'}
-      - {id: S-file-kind, re: '\b(photo|photos|image|images|pdf|pdfs|scan|scans|attachment|attachments|pièce jointe|fichier|fichiers|floor[- ]plans?|plans? d.étage)\b'}
+      - {id: S-upload, re: '\b(upload\w*|téléverse\w*|téléverser)\b'}
+      - {id: S-file-kind, re: '\b(photos?|images?|pdfs?|scans?|attachments?|pièces? jointes?|justificatifs?|fichiers?|floor[- ]plans?|plans? d.étage)\b'}
     buys: [s3]
     question: Are the files bigger than 1 MB or binary? (below and queryable, Postgres is enough)
 
   public-media:
     why: an anonymous browser must load the files directly
     signals:
-      - {id: S-public, re: '\b(public url|publicly|anonymous(ly)?|shop pages?|public (page|site)|sans connexion)\b'}
+      - {id: S-public, re: '\b(public url|publicly|anonymous(ly)?|shop pages?|public (page|site)|sans connexion|url publique|pages? publiques?|accès public|anonymes?)\b'}
     requires_need: blob-storage
     buys: []                        # a flag on the bucket, not a brick
     flag: PUBLIC_BUCKET=1
@@ -52,7 +52,7 @@ needs:
     signals:
       - {id: S-bulk, re: '\b(bulk|batch|thousands?|milliers?|en masse|for each (employee|subscriber|customer|photo)|pour chaque)\b'}
       - {id: S-heavy, re: '\b(render\w*|resiz\w*|transcod\w*|thumbnails?|convert\w* .* (pdf|webp)|génère .* pdf|pdf payslips?)\b'}
-      - {id: S-import, re: '\b(csv import|import(s)? (a|the|from) .*csv|nightly|every night|chaque nuit)\b'}
+      - {id: S-import, re: '\b(csv import|import(s)? (a|the|from) .*csv|nightly|every night|chaque nuit|toutes les nuits|import\w* (un|le|des|les) .*csv)\b'}
       - {id: S-side-effect-recurring, re: '\b(every|each|chaque) (day|week|month|morning|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday|jour|semaine|mois|lundi|mardi|mercredi|jeudi|vendredi)\b.*\b(send|e-?mail|notify|remind|charge|invoice|envoie|rappelle)', also: '\b(send|e-?mail|notify|remind|charge|invoice|envoie|rappelle)\b.*\b(every|each|chaque) (day|week|month|morning|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday|jour|semaine|mois|lundi|mardi|mercredi|jeudi|vendredi)'}
       - {id: S-volume, numeric: fanout_units}   # a data volume ≥ fanout_units processed per action
       - {id: S-recurrence, re: '\b(every|each|chaque) (day|week|month|monday|tuesday|wednesday|thursday|friday|jour|semaine|mois)\b|\b(weekly|daily|monthly|recurring|repeats?|repeating|hebdomadaire|récurren\w*)\b'}
@@ -63,7 +63,7 @@ needs:
   durable-wait:
     why: a step waits beyond a request (a human, a timer of hours/days), must survive restarts, or must compensate
     signals:
-      - {id: S-approval, re: '\b(approv(e|es|al|als)|valid(e|ation) par|sign[- ]off|manager has \d+ days?)\b'}
+      - {id: S-approval, re: '\b(approv(e|es|al|als)|sign[- ]off|manager has \d+ days?|approuv\w*|approbation|validation (par|du|de la)|valid\w* (la|le|les|une|un|sa|leur) (demande|commande|achat|congé|note de frais)s?)\b'}
       - {id: S-long-timer, re: '\b(\d+[- ]days?|\d+[- ]jours?|reminder|remind(s)? .* after|relance|deadline|échéance|over \d+ (days|weeks))\b'}
       - {id: S-compensate, re: '\b(compensat\w*|refund(ed|s)?|rembourse\w*|saga|roll ?back across|cancel-and-refund)\b'}
       - {id: S-wait-human, re: '\b(wait(s)? for (a|the) (human|manager|approval)|human approves|approved by a human|attend (une|la) validation)\b'}
@@ -82,7 +82,7 @@ needs:
   semantic-search:
     why: retrieve by meaning, not by keyword — embeddings in pgvector, the embed alias through the gateway
     signals:
-      - {id: S-semantic, re: '\b(similar|semantic|retriev\w*|rag|finds? similar|recherche sémantique)\b', also: '\b(answers?|questions?|réponds?)\b.*\bfrom (the )?([\w-]+ ){0,3}(documents?|policies|policy|pdfs?|manuals?|knowledge base|wiki|tickets)\b'}
+      - {id: S-semantic, re: '\b(similar|semantic|retriev\w*|rag|finds? similar|recherche sémantique|similaires?)\b', also: '\b(answers?|questions?|répond\w*)\b.*\b(from|à partir|depuis) (the |des |du |de la |de l.)?([\w-]+ ){0,3}(documents?|policies|policy|politiques?|pdfs?|manuals?|manuels?|knowledge base|base de connaissances|wiki|tickets)\b'}
     buys: [apisix]
     flag: LLM_VKEY=1
     extension: "CREATE EXTENSION vector (in the app's DB only)"
@@ -98,7 +98,7 @@ needs:
   product-metrics:
     why: the brief names a usage metric someone will read
     signals:
-      - {id: S-metric, re: '\b(track(s|ed|ing)?|metrics?|kpis?|analytics|usage (rate|statistics)|conversion|funnel|how many (users|people) (use|visit))\b'}
+      - {id: S-metric, re: '\b(track(s|ed|ing)?|metrics?|kpis?|analytics|usage (rate|statistics)|conversion|funnel|how many (users|people) (use|visit)|indicateurs?|taux d.(utilisation|occupation)|suivent|statistiques d.usage)\b'}
     buys: [umami]
     flag: ANALYTICS_SITE=1
 
@@ -253,4 +253,4 @@ unsupported:
   - {id: U-local-llm, re: '\b(gpu|gpus|self[- ]hosted (llm|model)|run (llama|mistral) (locally|on our))\b', why: LLMs are proxied through APISIX, never served locally}
   - {id: U-firehose, re: '\b(\d{2,3}k msg/s|100k messages|kafka|million events per second)\b', why: Valkey Streams fan out jobs; this is not a Kafka-class log}
   - {id: U-native-mobile, re: '\b(native (ios|android) app|app store|play store)\b', why: the frontend contract is a static web app behind nginx}
-  - {id: U-regulated, re: '\b(patient records?|medical records?|health data|données de santé)\b', why: dev-mode secrets, shared test passwords, no internal TLS}
+  - {id: U-regulated, re: '\b(patient records?|medical records?|health data|données de santé|dossiers? (médica(l|ux)|patients?))\b', why: dev-mode secrets, shared test passwords, no internal TLS}

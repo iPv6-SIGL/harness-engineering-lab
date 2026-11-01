@@ -30,11 +30,11 @@ step "harness unit tests + typecheck"
 expect_exit 0 "bun test harness/test" bash -c "cd harness && bun install --frozen-lockfile >/dev/null && bun test test/ && bunx tsc --noEmit"
 
 step "evals: with vs without, every rule proven by a case (step 18)"
-expect_exit 0 "26 cases, ablation" $H evals
+expect_exit 0 "eval cases + ablation" $H evals
 echo "$LAST" | grep -E "ops points across|rules proven" | sed 's/^/  /'
 
 step "clean the run state (generated files only — the builder's code and the archived history stay)"
-SNAP="$(mktemp -d)"; [ -d "$APP_DIR/openspec" ] && cp -r "$APP_DIR/openspec" "$SNAP/"
+SNAP="$(mktemp -d)"; [ -d "$APP_DIR/openspec" ] && cp -r "$APP_DIR/openspec" "$SNAP/"; [ -d "$APP_DIR/.harness" ] && cp -r "$APP_DIR/.harness" "$SNAP/"
 rm -rf "$APP_DIR/.harness" "$APP_DIR/openspec/changes/add-deskbook" "$APP_DIR/artifacts"
 ok "removed .harness/ artifacts/ and the open change (openspec/specs + changes/archive kept, snapshot in $SNAP)"
 
@@ -67,6 +67,7 @@ step "PREVENT (step 7): the PreToolUse hook refuses what breaks a decision"
 hook() { echo "$1" | bun harness/hooks/guard.ts; }
 expect_exit 2 "Edit adding ioredis → refused, D3 quoted back" hook "{\"cwd\":\"$PWD/$APP_DIR\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$PWD/$APP_DIR/api/src/server.ts\",\"old_string\":\"import { S3Client } from \\\"bun\\\";\",\"new_string\":\"import { S3Client } from \\\"bun\\\";\\nimport Redis from \\\"ioredis\\\";\"}}"
 echo "$LAST" | head -2 | sed 's/^/    /'
+expect_exit 2 "from the repo root: cd deskbook && bun add ioredis → refused" hook "{\"cwd\":\"$PWD\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cd deskbook/api && bun add ioredis\"}}"
 expect_exit 2 "bun add bullmq → refused" hook "{\"cwd\":\"$PWD/$APP_DIR/api\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"bun add bullmq\"}}"
 expect_exit 2 "Write .harness/ledger.json → refused (the ledger is the harness's)" hook "{\"cwd\":\"$PWD/$APP_DIR\",\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$PWD/$APP_DIR/.harness/ledger.json\",\"content\":\"{}\"}}"
 expect_exit 2 "Write a worker service into the compose → refused" hook "{\"cwd\":\"$PWD/$APP_DIR\",\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$PWD/$APP_DIR/podman-compose.yml\",\"content\":\"services: {worker: {}}\"}}"
@@ -116,9 +117,11 @@ expect_exit 2 "the builder cannot rewrite the archived log" hook "{\"cwd\":\"$PW
 if [ "${E2E_ARCHIVE:-restore}" = "keep" ]; then
   ok "E2E_ARCHIVE=keep: the archive stays (commit it)"
 else
-  rm -rf "$APP_DIR/openspec"; [ -d "$SNAP/openspec" ] && cp -r "$SNAP/openspec" "$APP_DIR/"
-  bun harness/src/cli.ts plan harness/briefs/deskbook.v2.yaml --app-dir "$APP_DIR" >/dev/null
-  ok "versioned openspec/ restored and the open change re-planned (E2E_ARCHIVE=keep to keep this run's archive)"
+  # Put the versioned desired state back exactly as committed: a test run leaves no diff.
+  rm -rf "$APP_DIR/openspec" "$APP_DIR/.harness"
+  [ -d "$SNAP/openspec" ] && cp -r "$SNAP/openspec" "$APP_DIR/"
+  [ -d "$SNAP/.harness" ] && cp -r "$SNAP/.harness" "$APP_DIR/"
+  ok "versioned openspec/ and .harness/ restored as they were (E2E_ARCHIVE=keep to keep this run's archive)"
 fi
 
 printf "\n\033[1m%s\033[0m\n" "$([ $FAILS = 0 ] && echo "E2E GREEN — $STEP steps" || echo "E2E RED — $FAILS failure(s)")"
