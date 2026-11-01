@@ -1,0 +1,46 @@
+# budgets.yaml — ops points an app may spend, per app class (a CCoE setting).
+#
+# The class is DERIVED from the needs the requirements paid for, never declared
+# by the agent: the richest need wins (`rank`). A CRUD app that suddenly "needs"
+# Temporal is therefore re-classed as a process app and its bill is compared
+# with the process budget — and the decision that bought Temporal is on record.
+#
+# `profile` is the matrix row of the deck (slide 03): the bricks a typical app of
+# that family uses (Core + Key). It is a PRIOR, reported next to the bill, never
+# a purchase: the requirement decides, not the matrix.
+classes:
+  crud:
+    rank: 0
+    budget: 10
+    family: Web app + SSO (DeskBook)
+    profile: [frontend, api, casdoor, umami, postgres, openbao, registry, dozzle]
+  jobs:
+    rank: 1
+    trigger_needs: [async-work]
+    budget: 16
+    family: Bulk background jobs (PayslipRun)
+    profile: [frontend, api, worker, valkey, s3, openbao, registry, dozzle, postgres]
+  media:
+    rank: 2
+    trigger_needs: [public-media]
+    budget: 17
+    family: Media and documents (PhotoShelf)
+    profile: [frontend, api, worker, valkey, s3, postgres, openbao, registry, dozzle]
+  rag:
+    rank: 3
+    trigger_needs: [semantic-search]
+    budget: 17
+    family: Assistant over documents (AskHR)
+    profile: [frontend, api, apisix, casdoor, s3, postgres, openbao, registry, dozzle]
+  process:
+    rank: 4
+    trigger_needs: [durable-wait]
+    budget: 17
+    family: Long-running process (GearUp)
+    profile: [frontend, api, worker, temporal, temporal-ui, casdoor, postgres, openbao, registry, dozzle]
+  agent:
+    rank: 5
+    trigger_needs_all: [llm, durable-wait]
+    budget: 18
+    family: AI agent that acts (TriageBot)
+    profile: [api, worker, apisix, temporal, casdoor, postgres, openbao, registry, dozzle]

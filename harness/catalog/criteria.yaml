@@ -1,0 +1,256 @@
+# criteria.yaml — the curated half of the capability graph: WHEN a brick earns
+# its place in an app, WHEN it does not, and WHAT it costs to run for the life
+# of the app. build-graph.ts merges it with what the platform's own files say
+# (compose services, ports, aliases, bootstrap flags) and FAILS if a compose
+# service has no entry here — a new container never slips in unpriced.
+#
+# The decision model, in one line:
+#   a requirement's text emits SIGNALS → signals become NEEDS (unless a
+#   counter-signal vetoes them) → a need BUYS bricks → every bought brick that
+#   is not scaffold must be paid by at least one requirement id (R-id).
+#
+# Every rule carries an `id`: evals/run.ts ablates rules one by one and a rule
+# is kept only if at least one eval fails without it (the meta-rule).
+
+# ── Thresholds: the numbers that turn "it feels heavy" into a decision ─────
+thresholds:
+  latency_budget_ms: 350     # README → Performance: 100–350 ms endpoints are justified, beyond → 202/polling
+  durable_wait_s: 30         # a step that waits longer than a request can live is no longer a request
+  fanout_units: 100          # below that, a loop in the request is cheaper than a queue + a worker
+  blob_bytes: 1048576        # 1 MB: above, an object store; below and queryable, a Postgres column
+
+# ── Needs: what a requirement can ask of the platform ──────────────────────
+# signals    : regexes on the requirement text (EN + FR), case-insensitive
+# vetoed_by  : counter-signal rules that cancel the need when they match
+# buys       : the bricks the need pays for
+# question   : what brief-check asks when the signal is ambiguous
+needs:
+  identity:
+    why: users must be told apart, and roles must be enforced server-side
+    structural: personas            # bought when the brief declares at least one persona that logs in
+    buys: [casdoor]
+    question: Do the users log in, or is the app anonymous?
+
+  blob-storage:
+    why: binary files (images, PDFs, scans) do not belong in table rows
+    signals:
+      - {id: S-upload, re: '\b(upload\w*|téléverse\w*|téléverser)\b'}
+      - {id: S-file-kind, re: '\b(photos?|images?|pdfs?|scans?|attachments?|pièces? jointes?|justificatifs?|fichiers?|floor[- ]plans?|plans? d.étage)\b'}
+    buys: [s3]
+    question: Are the files bigger than 1 MB or binary? (below and queryable, Postgres is enough)
+
+  public-media:
+    why: an anonymous browser must load the files directly
+    signals:
+      - {id: S-public, re: '\b(public url|publicly|anonymous(ly)?|shop pages?|public (page|site)|sans connexion|url publique|pages? publiques?|accès public|anonymes?)\b'}
+    requires_need: blob-storage
+    buys: []                        # a flag on the bucket, not a brick
+    flag: PUBLIC_BUCKET=1
+
+  async-work:
+    why: work that exceeds the request latency budget, or fans out to many independent units
+    signals:
+      - {id: S-bulk, re: '\b(bulk|batch|thousands?|milliers?|en masse|for each (employee|subscriber|customer|photo)|pour chaque)\b'}
+      - {id: S-heavy, re: '\b(render\w*|resiz\w*|transcod\w*|thumbnails?|convert\w* .* (pdf|webp)|génère .* pdf|pdf payslips?)\b'}
+      - {id: S-import, re: '\b(csv import|import(s)? (a|the|from) .*csv|nightly|every night|chaque nuit|toutes les nuits|import\w* (un|le|des|les) .*csv)\b'}
+      - {id: S-side-effect-recurring, re: '\b(every|each|chaque) (day|week|month|morning|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday|jour|semaine|mois|lundi|mardi|mercredi|jeudi|vendredi)\b.*\b(send|e-?mail|notify|remind|charge|invoice|envoie|rappelle)', also: '\b(send|e-?mail|notify|remind|charge|invoice|envoie|rappelle)\b.*\b(every|each|chaque) (day|week|month|morning|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday|jour|semaine|mois|lundi|mardi|mercredi|jeudi|vendredi)'}
+      - {id: S-volume, numeric: fanout_units}   # a data volume ≥ fanout_units processed per action
+      - {id: S-recurrence, re: '\b(every|each|chaque) (day|week|month|monday|tuesday|wednesday|thursday|friday|jour|semaine|mois)\b|\b(weekly|daily|monthly|recurring|repeats?|repeating|hebdomadaire|récurren\w*)\b'}
+    vetoed_by: [V-read-time-recurrence]
+    buys: [valkey, worker]
+    question: Does one action trigger more than 100 units of work, or a step slower than 350 ms?
+
+  durable-wait:
+    why: a step waits beyond a request (a human, a timer of hours/days), must survive restarts, or must compensate
+    signals:
+      - {id: S-approval, re: '\b(approv(e|es|al|als)|sign[- ]off|manager has \d+ days?|approuv\w*|approbation|validation (par|du|de la)|valid\w* (la|le|les|une|un|sa|leur) (demande|commande|achat|congé|note de frais)s?)\b'}
+      - {id: S-long-timer, re: '\b(\d+[- ]days?|\d+[- ]jours?|reminder|remind(s)? .* after|relance|deadline|échéance|over \d+ (days|weeks))\b'}
+      - {id: S-compensate, re: '\b(compensat\w*|refund(ed|s)?|rembourse\w*|saga|roll ?back across|cancel-and-refund)\b'}
+      - {id: S-wait-human, re: '\b(wait(s)? for (a|the) (human|manager|approval)|human approves|approved by a human|attend (une|la) validation)\b'}
+      - {id: S-schedule, re: '\b(every|each|chaque) (week|month|monday|tuesday|wednesday|thursday|friday|semaine|mois)\b|\b(weekly|monthly|recurring|repeats?|hebdomadaire|récurren\w*)\b'}
+    vetoed_by: [V-read-time-recurrence-only]
+    buys: [temporal, temporal-ui, worker]
+    question: Must the process wait for a person or a timer longer than 30 s, and survive a restart while waiting?
+
+  llm:
+    why: the app generates, classifies or summarises natural language
+    signals:
+      - {id: S-genai, re: '\b(draft(s)?|summari[sz]e\w*|classif(y|ies)|triage\w*|chatbot|assistant|answer(s)? (questions|in one sentence)|rédige|résume|extract(s)? .* from (text|emails?))\b'}
+    buys: [apisix]
+    flag: LLM_VKEY=1
+
+  semantic-search:
+    why: retrieve by meaning, not by keyword — embeddings in pgvector, the embed alias through the gateway
+    signals:
+      - {id: S-semantic, re: '\b(similar|semantic|retriev\w*|rag|finds? similar|recherche sémantique|similaires?)\b', also: '\b(answers?|questions?|répond\w*)\b.*\b(from|à partir|depuis) (the |des |du |de la |de l.)?([\w-]+ ){0,3}(documents?|policies|policy|politiques?|pdfs?|manuals?|manuels?|knowledge base|base de connaissances|wiki|tickets)\b'}
+    buys: [apisix]
+    flag: LLM_VKEY=1
+    extension: "CREATE EXTENSION vector (in the app's DB only)"
+
+  image-generation:
+    why: generated images go through task:image — OpenAI mode only
+    signals:
+      - {id: S-genimage, re: '\b(generate[sd]? (an? )?(image|images|backgrounds?|illustrations?)|image generation)\b'}
+    buys: [apisix]
+    flag: LLM_VKEY=1
+    provider_constraint: openai
+
+  product-metrics:
+    why: the brief names a usage metric someone will read
+    signals:
+      - {id: S-metric, re: '\b(track(s|ed|ing)?|metrics?|kpis?|analytics|usage (rate|statistics)|conversion|funnel|how many (users|people) (use|visit)|indicateurs?|taux d.(utilisation|occupation)|suivent|statistiques d.usage)\b'}
+    buys: [umami]
+    flag: ANALYTICS_SITE=1
+
+# ── Counter-signals: the rules that REFUSE a brick the keywords would buy ──
+vetoes:
+  V-read-time-recurrence:
+    why: a recurrence with no side effect is a rule evaluated when someone reads it — no clock has to fire
+    re: '\b(every|each|chaque) (day|week|month|monday|tuesday|wednesday|thursday|friday|jour|semaine|mois)\b|\b(weekly|daily|monthly|recurring|repeats?|repeating|hebdomadaire|récurren\w*)\b'
+    only_if_signals: [S-recurrence]   # vetoes only when recurrence is the SOLE reason (5,000 PDFs every month still needs workers)
+    unless: S-side-effect-recurring   # "every Monday, e-mail the list" DOES need a scheduler
+    cancels: [async-work]
+    avoids: a worker container, a stream to watch, a scheduler to keep alive
+
+  V-read-time-recurrence-only:
+    why: '"repeat every week until a date" is data read at query time, not a process that waits'
+    re: '\b(every|each|chaque) (week|month|monday|tuesday|wednesday|thursday|friday|semaine|mois)\b|\b(weekly|monthly|recurring|repeats?|hebdomadaire|récurren\w*)\b'
+    only_if_signals: [S-schedule, S-long-timer]   # vetoes durable-wait when the only durable signals are the recurrence and its horizon
+    cancels: [durable-wait]
+    avoids: a Temporal namespace, a worker, a UI to operate
+
+# ── Bricks: price + fingerprints. Fingerprints are what fitness/ and the
+#    hook look for in code; a refused brick's fingerprints become its guard. ─
+# ops_points = what the app team runs for the life of the app: 1 per container
+# it owns or must watch, +1 for a console or a second container, the shared
+# ones (registry, dozzle, openbao) at 1 because every app is a tenant of them.
+bricks:
+  frontend:
+    layer: app
+    scaffold: true
+    ops_points: 1
+    costs: [1 nginx container]
+    use_when: the app has screens
+  api:
+    layer: app
+    scaffold: true
+    ops_points: 1
+    costs: [1 Bun container, /health + /ready]
+    use_when: always — the business entry point
+  worker:
+    layer: app
+    ops_points: 2
+    price_assumed: true
+    costs: [1 Bun container, its own health port (+8), a drain on SIGTERM, a backlog to watch]
+    use_when: work leaves the request (a queue to drain or workflows to run)
+    not_when: the work fits the 350 ms budget, or a rule can be read at query time
+    fingerprints:
+      service: [worker]
+      paths: [worker/]
+  postgres:
+    layer: data
+    scaffold: true
+    ops_points: 1
+    costs: [1 DB + 1 user, backups]
+    use_when: always — the system of record
+  openbao:
+    layer: data
+    scaffold: true
+    ops_points: 1
+    costs: [secret/<app>/ paths]
+    use_when: always — secrets read at boot
+  registry:
+    layer: ops
+    scaffold: true
+    ops_points: 1
+    costs: [images under <app>/]
+    use_when: always
+  dozzle:
+    layer: ops
+    scaffold: true
+    ops_points: 1
+    costs: [logs on stdout]
+    use_when: always
+  casdoor:
+    layer: edge
+    ops_points: 2
+    costs: [1 OIDC client, test personas, a callback route, sessions]
+    use_when: at least one persona logs in
+    not_when: the app is anonymous
+    switch: idp/onboard-oidc.sh <app> <redirect_uri>
+    fingerprints:
+      patterns: ['secret/\$\{?APP\}?/oidc', '/oidc']
+  s3:
+    layer: data
+    ops_points: 1
+    costs: [1 bucket + 1 scoped key]
+    use_when: binary files or objects above 1 MB
+    not_when: small structured data you query — a Postgres column
+    switch: bootstrap.sh (always creates the bucket; buying = the code uses it)
+    fingerprints:
+      patterns: ['Bun\.S3Client', '\bS3Client\b', '@aws-sdk/client-s3']
+      imports: ['@aws-sdk/client-s3', 'minio']
+  valkey:
+    layer: orchestration
+    ops_points: 2
+    price_assumed: true
+    costs: [an <app>: key prefix, a stream + consumer group to watch, memory]
+    use_when: fan out N independent units to competing consumers
+    not_when: a rule read at query time; work under 350 ms
+    fingerprints:
+      imports: [ioredis, redis, bullmq, '@valkey/valkey-glide', bee-queue]
+      patterns: ['Bun\.RedisClient', 'new RedisClient', 'redis://', 'valkey\.internal']
+      env: [REDIS_URL]
+    witness: {probe: valkey-keys, expect_absent: true}
+  temporal:
+    layer: orchestration
+    ops_points: 2
+    price_assumed: true
+    costs: [1 namespace, workflow versioning on every deploy, runs to watch]
+    use_when: a step waits, retries for hours, compensates, or waits for a human
+    not_when: a rule can be read at query time
+    switch: TEMPORAL_NS=1
+    requires: [temporal-ui, worker]
+    fingerprints:
+      imports: ['@temporalio/client', '@temporalio/worker', '@temporalio/workflow']
+      patterns: ['temporal\.internal', '@temporalio/']
+      env: [TEMPORAL_ADDRESS]
+      flags: [TEMPORAL_NS]
+    witness: {probe: temporal-namespace, expect_absent: true}
+  temporal-ui:
+    layer: orchestration
+    ops_points: 1
+    price_assumed: true
+    costs: [a console someone must know how to read]
+    use_when: Temporal is bought
+  apisix:
+    layer: edge
+    ops_points: 1
+    price_assumed: true
+    costs: [1 virtual key, a token budget, provider quirks, evals]
+    use_when: the app generates, classifies, summarises or embeds text
+    not_when: no natural-language task in the brief
+    switch: LLM_VKEY=1
+    fingerprints:
+      imports: [openai, '@anthropic-ai/sdk', 'ai', '@ai-sdk/openai', langchain]
+      patterns: ['llm\.internal', 'api\.openai\.com', 'api\.anthropic\.com', 'task:(cheap|quality|vision|reasoning|embed|image)']
+      flags: [LLM_VKEY]
+    witness: {probe: llm-consumer, expect_absent: true}
+  umami:
+    layer: edge
+    ops_points: 1
+    costs: [1 website, a beacon proxied first-party, a privacy register entry]
+    use_when: a usage metric is named in the brief
+    not_when: nobody named a metric
+    switch: ANALYTICS_SITE=1
+    fingerprints:
+      patterns: ['analytics\.internal', 'umami', 'data-website-id']
+      flags: [ANALYTICS_SITE]
+    witness: {probe: analytics-site, expect_absent: true}
+
+# ── What the platform cannot host (deck slide 10): refused outright ────────
+unsupported:
+  - {id: U-local-llm, re: '\b(gpu|gpus|self[- ]hosted (llm|model)|run (llama|mistral) (locally|on our))\b', why: LLMs are proxied through APISIX, never served locally}
+  - {id: U-firehose, re: '\b(\d{2,3}k msg/s|100k messages|kafka|million events per second)\b', why: Valkey Streams fan out jobs; this is not a Kafka-class log}
+  - {id: U-native-mobile, re: '\b(native (ios|android) app|app store|play store)\b', why: the frontend contract is a static web app behind nginx}
+  - {id: U-regulated, re: '\b(patient records?|medical records?|health data|données de santé|dossiers? (médica(l|ux)|patients?))\b', why: dev-mode secrets, shared test passwords, no internal TLS}

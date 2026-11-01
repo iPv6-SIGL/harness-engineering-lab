@@ -1,0 +1,154 @@
+# the decision log, machine-readable — archived at step 15 into openspec/specs/deskbook/decisions.md
+- id: D1
+  title: Identity through casdoor (OIDC)
+  serves:
+    &serves
+    - R1
+    - R2
+    - R3
+    - R4
+    - R5
+  chose: "one OIDC client, one group per persona, roles checked server-side"
+  rejected: a users table in the app (a second user store)
+  avoids: "password storage, reset flows, a login screen to secure"
+  revisit_when: "a persona must act without a company account (visitors, partners) — that is a new persona and a new group, not a users table"
+  scales_by: "sessions live in Postgres, so any API replica serves any user; the IdP is shared and scales with the platform"
+  bricks:
+    - casdoor
+  guard:
+    id: D1
+    decision: Identity through casdoor (OIDC)
+    serves:
+      *serves
+    owner: decide step · human-reviewed
+    forbid_import: []
+    forbid_pattern: []
+    forbid_env: []
+    forbid_service: []
+    forbid_path: []
+    forbid_flag: []
+    witness:
+      - probe: secret-read
+        expect: present
+        detail: secret/deskbook/oidc
+- id: D2
+  title: "Files in the app's S3 bucket, private"
+  serves:
+    &serves1
+    - R4
+  chose: "the app's bucket with its scoped key, streamed through the API"
+  rejected: files as Postgres blobs; PUBLIC_BUCKET=1 (no requirement serves files to anonymous users)
+  avoids: bloated backups and DB reads on every page
+  revisit_when: "a requirement serves the files to anonymous browsers (public-media → PUBLIC_BUCKET=1), or the files need processing (async-work)"
+  scales_by: "the object store holds the bytes, the API only streams them; past ~50 requests/s of downloads, serve signed URLs instead of streaming"
+  bricks:
+    - s3
+  guard:
+    id: D2
+    decision: "Files in the app's S3 bucket, private"
+    serves:
+      *serves1
+    owner: decide step · human-reviewed
+    forbid_import: []
+    forbid_pattern: []
+    forbid_env: []
+    forbid_service: []
+    forbid_path: []
+    forbid_flag:
+      - PUBLIC_BUCKET
+    witness:
+      - probe: s3-anonymous
+        expect: denied
+- id: D3
+  title: "No Valkey, no worker, no Temporal"
+  serves:
+    - R5
+  chose: "a recurrence with no side effect is a rule evaluated when someone reads it — no clock has to fire; \"repeat every week until a date\" is data read at query time, not a process that waits"
+  rejected: a scheduler job per recurrence; one workflow per recurring item
+  avoids: "a worker container, a stream to watch, a scheduler to keep alive; a Temporal namespace, a worker, a UI to operate"
+  revisit_when: "the recurrence gains a side effect (send, e-mail, notify, charge) or one action fans out ≥ 100 units — then buy valkey + worker with that R-id; a step must wait for a person or a timer beyond 30 s, survive a restart, or compensate — then buy temporal with that R-id"
+  scales_by: "the rule is evaluated at read time in SQL + domain code: cost grows with the rows read, not with a clock; no process waits, so nothing to replicate or version"
+  bricks:
+    - valkey
+    - worker
+    - temporal
+    - temporal-ui
+  guard:
+    id: D3
+    decision: "No Valkey, no worker, no Temporal"
+    serves:
+      - R5
+    owner: decide step · human-reviewed
+    forbid_import:
+      - ioredis
+      - redis
+      - bullmq
+      - "@valkey/valkey-glide"
+      - bee-queue
+      - "@temporalio/client"
+      - "@temporalio/worker"
+      - "@temporalio/workflow"
+    forbid_pattern:
+      - Bun\.RedisClient
+      - new RedisClient
+      - redis://
+      - valkey\.internal
+      - temporal\.internal
+      - "@temporalio/"
+    forbid_env:
+      - REDIS_URL
+      - TEMPORAL_ADDRESS
+    forbid_service:
+      - worker
+    forbid_path:
+      - worker/
+    forbid_flag:
+      - TEMPORAL_NS
+    witness:
+      - probe: valkey-keys
+        expect: absent
+      - probe: temporal-namespace
+        expect: absent
+- id: D4
+  title: Nothing unasked
+  serves:
+    - "*"
+  chose: "stay out: apisix, umami — no requirement emits a signal for them"
+  rejected: "apisix \"in case\", umami \"in case\""
+  avoids: "2 ops points: 1 virtual key, a token budget, provider quirks, evals; 1 website, a beacon proxied first-party, a privacy register entry"
+  revisit_when: "apisix: the app generates, classifies, summarises or embeds text; umami: a usage metric is named in the brief"
+  scales_by: "nothing to scale: what does not run costs nothing"
+  bricks:
+    - apisix
+    - umami
+  guard:
+    id: D4
+    decision: Nothing unasked
+    serves:
+      - "*"
+    owner: decide step · human-reviewed
+    forbid_import:
+      - openai
+      - "@anthropic-ai/sdk"
+      - ai
+      - "@ai-sdk/openai"
+      - langchain
+    forbid_pattern:
+      - llm\.internal
+      - api\.openai\.com
+      - api\.anthropic\.com
+      - task:(cheap|quality|vision|reasoning|embed|image)
+      - analytics\.internal
+      - umami
+      - data-website-id
+    forbid_env: []
+    forbid_service: []
+    forbid_path: []
+    forbid_flag:
+      - LLM_VKEY
+      - ANALYTICS_SITE
+    witness:
+      - probe: llm-consumer
+        expect: absent
+      - probe: analytics-site
+        expect: absent

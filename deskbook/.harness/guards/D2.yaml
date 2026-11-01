@@ -1,0 +1,16 @@
+# compiled from design.md D2 — the builder reads it, never edits it
+id: D2
+decision: "Files in the app's S3 bucket, private"
+serves:
+  - R4
+owner: decide step · human-reviewed
+forbid_import: []
+forbid_pattern: []
+forbid_env: []
+forbid_service: []
+forbid_path: []
+forbid_flag:
+  - PUBLIC_BUCKET
+witness:
+  - probe: s3-anonymous
+    expect: denied

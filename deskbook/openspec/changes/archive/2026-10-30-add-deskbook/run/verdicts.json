@@ -1,0 +1,50 @@
+{
+  "run": "run-20261030-122642",
+  "verdict": "green",
+  "drift": [],
+  "mutants": [
+    {
+      "file": "api/src/domain.ts",
+      "total": 46,
+      "killed": 42,
+      "score": 0.9130434782608695,
+      "survivors": [
+        {
+          "line": 128,
+          "op": "arithmetic",
+          "from": "-",
+          "to": "+",
+          "killed": false
+        },
+        {
+          "line": 158,
+          "op": "arithmetic",
+          "from": "+",
+          "to": "-",
+          "killed": false
+        },
+        {
+          "line": 158,
+          "op": "number",
+          "from": "60",
+          "to": "61",
+          "killed": false
+        },
+        {
+          "line": 159,
+          "op": "boolean",
+          "from": "true",
+          "to": "false",
+          "killed": false
+        }
+      ]
+    }
+  ],
+  "review": {
+    "status": "skipped",
+    "reason": "no openai key in secret/core/openai or no harness vkey — the human gate reviews instead",
+    "findings": []
+  },
+  "evidence_ok": 11,
+  "evidence_total": 11
+}

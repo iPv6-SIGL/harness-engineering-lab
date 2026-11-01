@@ -1,0 +1,165 @@
+{
+  "app": "deskbook",
+  "run": "run-20261030-122642",
+  "prompt_hash": "174d814c9b6a",
+  "tasks": [
+    {
+      "id": "1.1",
+      "title": "APP=deskbook ./bootstrap.sh",
+      "owner": "harness",
+      "scenarios": [
+        "C1 ready"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-10-30T12:26:52.864Z"
+    },
+    {
+      "id": "1.2",
+      "title": "OIDC client + 2 test personas (employee, office-manager)",
+      "owner": "harness",
+      "scenarios": [
+        "C1 oidc"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-10-30T12:26:52.973Z"
+    },
+    {
+      "id": "2.1",
+      "title": "Data model and seed (migrations in api/src/db.ts)",
+      "owner": "builder",
+      "scenarios": [
+        "C1 ready"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-10-30T12:26:53.084Z"
+    },
+    {
+      "id": "3.1",
+      "title": "R1 · An employee books one free desk per half-day; a desk already taken is refused and two free desks nearby are offered.",
+      "owner": "builder",
+      "requirement": "R1",
+      "scenarios": [
+        "R1 desk-taken",
+        "R1 one-per-half-day",
+        "R1 no-double-booking"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-10-30T12:26:53.251Z"
+    },
+    {
+      "id": "3.2",
+      "title": "R2 · Employees sign in once with their company account; each persona only performs the actions of its role.",
+      "owner": "builder",
+      "requirement": "R2",
+      "scenarios": [
+        "R2 sso-login",
+        "R2 anonymous-refused"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-10-30T12:26:53.378Z"
+    },
+    {
+      "id": "3.3",
+      "title": "R3 · An office manager opens and closes meeting rooms; a closed room cannot be booked.",
+      "owner": "builder",
+      "requirement": "R3",
+      "scenarios": [
+        "R3 manager-closes-room",
+        "R3 employee-cannot-close"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-10-30T12:26:53.524Z"
+    },
+    {
+      "id": "3.4",
+      "title": "R4 · An office manager uploads a floor-plan image for a floor; plans stay visible to signed-in employees only.",
+      "owner": "builder",
+      "requirement": "R4",
+      "scenarios": [
+        "R4 upload-plan",
+        "R4 plan-private"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-10-30T12:26:53.662Z"
+    },
+    {
+      "id": "3.5",
+      "title": "R5 · A booking can repeat every week until an end date chosen at booking, at most 26 weeks.",
+      "owner": "builder",
+      "requirement": "R5",
+      "scenarios": [
+        "R5 weekly-until",
+        "R5 weekly-conflict"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-10-30T12:26:53.818Z"
+    },
+    {
+      "id": "4.1",
+      "title": "Screens: the persona journeys in frontend/",
+      "owner": "builder",
+      "scenarios": [
+        "C1 frontend"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-10-30T12:26:53.936Z"
+    },
+    {
+      "id": "5.1",
+      "title": "Contracts: /health, /ready, ports 8010–8011, SIGTERM < 10 s",
+      "owner": "builder",
+      "scenarios": [
+        "C1 health",
+        "C1 ready"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-10-30T12:26:54.048Z"
+    },
+    {
+      "id": "5.2",
+      "title": "Stateless API: no state in the process — a session survives an API restart, so a second replica can serve it",
+      "owner": "builder",
+      "scenarios": [
+        "C1 stateless"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-10-30T12:26:56.091Z"
+    }
+  ],
+  "gates": {
+    "spec": {
+      "approved": true,
+      "by": "e2e-runner (stand-in for the human reviewer)",
+      "at": "2026-10-30T12:26:43.023Z",
+      "note": "bill and D1–D4 reviewed"
+    },
+    "merge": {
+      "approved": true,
+      "by": "e2e-runner (stand-in for the human reviewer)",
+      "at": "2026-10-30T12:27:08.933Z",
+      "note": "reviewer skipped (no provider key): diff read by the human"
+    }
+  }
+}

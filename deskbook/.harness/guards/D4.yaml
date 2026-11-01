@@ -1,0 +1,31 @@
+# compiled from design.md D4 — the builder reads it, never edits it
+id: D4
+decision: Nothing unasked
+serves:
+  - "*"
+owner: decide step · human-reviewed
+forbid_import:
+  - openai
+  - "@anthropic-ai/sdk"
+  - ai
+  - "@ai-sdk/openai"
+  - langchain
+forbid_pattern:
+  - llm\.internal
+  - api\.openai\.com
+  - api\.anthropic\.com
+  - task:(cheap|quality|vision|reasoning|embed|image)
+  - analytics\.internal
+  - umami
+  - data-website-id
+forbid_env: []
+forbid_service: []
+forbid_path: []
+forbid_flag:
+  - LLM_VKEY
+  - ANALYTICS_SITE
+witness:
+  - probe: llm-consumer
+    expect: absent
+  - probe: analytics-site
+    expect: absent

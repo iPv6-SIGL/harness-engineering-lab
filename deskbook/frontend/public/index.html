@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DeskBook</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header>
+    <h1>DeskBook</h1>
+    <span id="who"></span>
+    <a id="login" href="/auth/login">Sign in</a>
+    <button id="logout" type="button" hidden>Sign out</button>
+  </header>
+  <main id="app" hidden>
+    <form id="when" aria-label="When and where">
+      <label>Day <input id="day" type="date" required></label>
+      <label>Half-day
+        <select id="half"><option value="am">Morning</option><option value="pm">Afternoon</option></select>
+      </label>
+      <label>Floor
+        <select id="floor"><option>1</option><option>2</option><option>3</option></select>
+      </label>
+      <label><input id="weekly" type="checkbox"> Every week until</label>
+      <input id="until" type="date" aria-label="Repeat until">
+    </form>
+    <p id="message" role="status" aria-live="polite"></p>
+    <div id="plan" aria-label="Floor plan"></div>
+    <section id="manager" hidden>
+      <h2>Office manager</h2>
+      <label>Floor plan (PNG or SVG, up to 2 MB) <input id="planfile" type="file" accept="image/png,image/svg+xml"></label>
+      <p>Select a room on the plan, then <button id="toggle" type="button">Open / close it</button></p>
+    </section>
+  </main>
+</body>
+</html>
