@@ -53,12 +53,18 @@ needs:
       - {id: S-bulk, re: '\b(bulk|batch|thousands?|milliers?|en masse|for each (employee|subscriber|customer|photo)|pour chaque)\b'}
       - {id: S-heavy, re: '\b(render\w*|resiz\w*|transcod\w*|thumbnails?|convert\w* .* (pdf|webp)|génère .* pdf|pdf payslips?)\b'}
       - {id: S-import, re: '\b(csv import|import(s)? (a|the|from) .*csv|nightly|every night|chaque nuit|toutes les nuits|import\w* (un|le|des|les) .*csv)\b'}
-      - {id: S-side-effect-recurring, re: '\b(every|each|chaque) (day|week|month|morning|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday|jour|semaine|mois|lundi|mardi|mercredi|jeudi|vendredi)\b.*\b(send|e-?mail|notify|remind|charge|invoice|envoie|rappelle)', also: '\b(send|e-?mail|notify|remind|charge|invoice|envoie|rappelle)\b.*\b(every|each|chaque) (day|week|month|morning|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday|jour|semaine|mois|lundi|mardi|mercredi|jeudi|vendredi)'}
       - {id: S-volume, numeric: fanout_units}   # a data volume ≥ fanout_units processed per action
       - {id: S-recurrence, re: '\b(every|each|chaque) (day|week|month|monday|tuesday|wednesday|thursday|friday|jour|semaine|mois)\b|\b(weekly|daily|monthly|recurring|repeats?|repeating|hebdomadaire|récurren\w*)\b'}
     vetoed_by: [V-read-time-recurrence]
     buys: [valkey, worker]
     question: Does one action trigger more than 100 units of work, or a step slower than 350 ms?
+
+  scheduled-job:
+    why: a clock fires a side effect (send, notify, charge) on a schedule, with fewer than fanout_units of work per run
+    signals:
+      - {id: S-side-effect-recurring, re: '\b(every|each|chaque) (day|week|month|morning|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday|jour|semaine|mois|lundi|mardi|mercredi|jeudi|vendredi)\b.*\b(send|e-?mail|notify|remind|charge|invoice|envoie|rappelle)', also: '\b(send|e-?mail|notify|remind|charge|invoice|envoie|rappelle)\b.*\b(every|each|chaque) (day|week|month|morning|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday|jour|semaine|mois|lundi|mardi|mercredi|jeudi|vendredi)'}
+    buys: [worker]            # one container that wakes on a clock and claims due work in the app's Postgres: no stream for a handful of sends
+    question: "Does one run touch more than 100 units? (then it is async-work, with a stream and competing workers)"
 
   durable-wait:
     why: a step waits beyond a request (a human, a timer of hours/days), must survive restarts, or must compensate
@@ -105,12 +111,11 @@ needs:
 # ── Counter-signals: the rules that REFUSE a brick the keywords would buy ──
 vetoes:
   V-read-time-recurrence:
-    why: a recurrence with no side effect is a rule evaluated when someone reads it — no clock has to fire
+    why: a recurrence is a rule evaluated when someone reads it — no clock has to fire; a clock that fires a few sends needs one worker (scheduled-job), never a stream
     re: '\b(every|each|chaque) (day|week|month|monday|tuesday|wednesday|thursday|friday|jour|semaine|mois)\b|\b(weekly|daily|monthly|recurring|repeats?|repeating|hebdomadaire|récurren\w*)\b'
     only_if_signals: [S-recurrence]   # vetoes only when recurrence is the SOLE reason (5,000 PDFs every month still needs workers)
-    unless: S-side-effect-recurring   # "every Monday, e-mail the list" DOES need a scheduler
     cancels: [async-work]
-    avoids: a worker container, a stream to watch, a scheduler to keep alive
+    avoids: a stream to watch and a consumer group to size, a scheduler to keep alive
 
   V-read-time-recurrence-only:
     why: '"repeat every week until a date" is data read at query time, not a process that waits'
@@ -254,3 +259,17 @@ unsupported:
   - {id: U-firehose, re: '\b(\d{2,3}k msg/s|100k messages|kafka|million events per second)\b', why: Valkey Streams fan out jobs; this is not a Kafka-class log}
   - {id: U-native-mobile, re: '\b(native (ios|android) app|app store|play store)\b', why: the frontend contract is a static web app behind nginx}
   - {id: U-regulated, re: '\b(patient records?|medical records?|health data|données de santé|dossiers? (médica(l|ux)|patients?))\b', why: dev-mode secrets, shared test passwords, no internal TLS}
+
+# ── Gaps: what a requirement asks that the platform has NO brick for ───────
+# Not a refusal (the app may still be built) and not a purchase (nothing to buy):
+# the bill says so out loud, the decision log records it, `approve spec` needs an
+# explicit --ack-gap, and a guard stops the builder from filling the hole itself
+# (a service added to the shared platform, a mail client in the app). Measured:
+# 2 of 2 agents given "e-mail each manager on Mondays" added a mail service to
+# the platform without saying so. Fill a gap by pricing a brick in `bricks:`.
+gaps:
+  - id: G-outbound-mail
+    re: '\b(e-?mails?|courriels?|mails?)\b.*\b(send|sends|sent|receive|receives|received|envoie|envoient|reçoit|reçoivent)\b|\b(send|sends|receive|receives|envoie|envoient|reçoit|reçoivent)\b.*\b(e-?mails?|courriels?|mails?)\b|\b(e-?mails?|courriels?)\b\s+(one|the|a|an|each|every|all|les|la|le|un|une|chaque)\b'
+    why: the platform has no mail relay — an app must not add one to the shared platform; the CCoE decides (an airgap upstream, a relay)
+    forbid_import: [nodemailer, '@sendgrid/mail', emailjs, mailgun.js, postmark]
+    forbid_pattern: ['smtps?://', 'createTransport', 'smtp\.internal', 'mailpit', 'RCPT TO']

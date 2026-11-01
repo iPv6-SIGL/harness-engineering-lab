@@ -61,7 +61,43 @@ cases:
       personas: [{slug: office-manager, does: reads the digest}]
       requirements:
         - {id: R1, persona: office-manager, text: "Every Monday morning, e-mail the office managers the list of the week's bookings."}
-    expect: {class: jobs, buy: [casdoor, valkey, worker], refuse: [temporal]}
+    # measured on 2 agents: a Postgres-claiming worker is enough for a handful of sends, a stream is not
+    expect: {class: jobs, buy: [casdoor, worker], refuse: [valkey, temporal], points: 10, gaps: [G-outbound-mail]}
+
+  - name: "trap: a weekly digest of a few rows does not need Valkey"
+    brief:
+      app: deskbook-v3
+      personas: [{slug: office-manager, does: reads the digest}]
+      requirements:
+        - {id: R1, persona: office-manager, text: "An office manager opens and closes rooms."}
+        - {id: R2, persona: office-manager, text: "A booking can repeat every week until an end date chosen at booking, at most 26 weeks."}
+        - {id: R3, persona: office-manager, text: "Every Monday morning each office manager receives an e-mail listing next week's bookings on their floor."}
+    # R2 alone stays free (read-time recurrence, D3); R3 has a side effect → a worker, no stream, no workflow
+    expect: {class: jobs, buy: [casdoor, worker], refuse: [valkey, temporal, temporal-ui], vetoed: [async-work@R2, durable-wait@R2, durable-wait@R3], gaps: [G-outbound-mail]}
+
+  - name: "trap: a monthly digest of 5000 rows IS bulk, with a stream"
+    brief:
+      app: payslip-mail
+      personas: [{slug: hr, does: sends the payslips}]
+      requirements:
+        - {id: R1, persona: hr, text: "Every month the app e-mails one payslip to each employee.", volume: 5000}
+    expect: {class: jobs, buy: [valkey, worker], refuse: [temporal], gaps: [G-outbound-mail]}
+
+  - name: "probe G-outbound-mail (fr): un rappel par courriel"
+    brief:
+      app: rappel
+      personas: [{slug: manager, does: valide}]
+      requirements:
+        - {id: R1, persona: manager, text: "Chaque lundi le système envoie un courriel au manager avec les demandes en attente."}
+    expect: {class: jobs, buy: [worker], refuse: [valkey, temporal], gaps: [G-outbound-mail]}
+
+  - name: "trap: no e-mail, no gap"
+    brief:
+      app: desk-lite
+      personas: [{slug: employee, does: books}]
+      requirements:
+        - {id: R1, persona: employee, text: "An employee books a free desk for a half-day."}
+    expect: {class: crud, refuse: [valkey, worker, temporal], gaps: []}
 
   - name: "trap: monthly bulk rendering is still bulk"
     brief:
@@ -160,9 +196,9 @@ cases:
   - name: "fr: répondre à partir des documents RH, c'est du RAG"
     brief: {app: fr3, personas: [{slug: employe, does: pose des questions}], requirements: [{id: R1, persona: employe, text: "L'assistant répond aux questions à partir des politiques RH."}]}
     expect: {class: rag, buy: [apisix]}
-  - name: "fr: un envoi chaque lundi demande un worker"
+  - name: "fr: un envoi chaque lundi demande un worker, pas un flux"
     brief: {app: fr4, personas: [{slug: responsable, does: lit la liste}], requirements: [{id: R1, persona: responsable, text: "Chaque lundi, envoie par e-mail la liste des réservations aux responsables."}]}
-    expect: {class: jobs, buy: [valkey, worker], refuse: [temporal]}
+    expect: {class: jobs, buy: [worker], refuse: [valkey, temporal], gaps: [G-outbound-mail]}
   - name: "fr: les données de santé sont refusées"
     brief: {app: fr5, personas: [], anonymous: true, requirements: [{id: R1, text: "Stocker les données de santé des patients de la clinique."}]}
     expect: {unsupported: [U-regulated]}

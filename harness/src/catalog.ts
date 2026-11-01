@@ -69,7 +69,9 @@ export type Criteria = {
     fingerprints?: Fingerprints;
   }>;
   unsupported: { id: string; re: string; why: string }[];
+  gaps?: Gap[];
 };
+export type Gap = { id: string; re: string; why: string; forbid_import: string[]; forbid_pattern: string[] };
 export type AppClass = {
   rank: number;
   budget: number;
@@ -87,6 +89,7 @@ export type Graph = {
   bricks: Record<string, Brick>;
   classes: Record<string, AppClass>;
   unsupported: Criteria["unsupported"];
+  gaps: Gap[];
   bootstrap_flags: string[];
 };
 
@@ -188,6 +191,7 @@ export function buildGraph(core = corePlatformDir()): Graph {
     bricks,
     classes,
     unsupported: criteria.unsupported,
+    gaps: criteria.gaps ?? [],
     bootstrap_flags: bootstrapFlags,
   };
 }

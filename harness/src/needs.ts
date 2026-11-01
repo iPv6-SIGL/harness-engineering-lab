@@ -48,6 +48,7 @@ export type Bill = {
   vetoed: { need: string; requirement: string; rule: string; why: string; avoids: string }[];
   hits: Record<string, Hit[]>; // R-id → hits
   unsupported: { id: string; why: string; match: string }[];
+  gaps: { id: string; why: string; match: string; requirement: string }[];
   provider_constraints: string[];
 };
 
@@ -198,6 +199,11 @@ export function needTest(brief: Brief, g: Graph, opts: NeedTestOptions = {}): Bi
     .filter((x) => x.m && !disabled.has(x.u.id))
     .map((x) => ({ id: x.u.id, why: x.u.why, match: x.m![0] }));
 
+  const gaps = g.gaps
+    .filter((gp) => !disabled.has(gp.id))
+    .flatMap((gp) => brief.requirements.map((r) => ({ gp, r, m: r.text.match(rx(gp.re)) })).filter((x) => x.m))
+    .map((x) => ({ id: x.gp.id, why: x.gp.why, match: x.m![0], requirement: x.r.id }));
+
   return {
     app: brief.app,
     class: cls,
@@ -213,6 +219,7 @@ export function needTest(brief: Brief, g: Graph, opts: NeedTestOptions = {}): Bi
     vetoed,
     hits,
     unsupported,
+    gaps,
     provider_constraints: [...new Set(Object.keys(needs).map((n) => g.needs[n].provider_constraint).filter(Boolean) as string[])],
   };
 }
