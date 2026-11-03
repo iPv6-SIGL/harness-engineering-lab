@@ -76,6 +76,7 @@ needs:
       - {id: S-schedule, re: '\b(every|each|chaque) (week|month|monday|tuesday|wednesday|thursday|friday|semaine|mois)\b|\b(weekly|monthly|recurring|repeats?|hebdomadaire|récurren\w*)\b'}
     vetoed_by: [V-read-time-recurrence-only]
     buys: [temporal, temporal-ui, worker]
+    flag: TEMPORAL_NS=1             # the app creates its own namespace at provision
     question: Must the process wait for a person or a timer longer than 30 s, and survive a restart while waiting?
 
   llm:

@@ -1,0 +1,60 @@
+# The PhotoShelf brief (media class): marketing uploads raw product photos in
+# batches, a worker resizes them to WebP, the shop pages load them anonymously.
+app: photoshelf
+version: 1
+port_block: 8020
+prompt: >
+  Build PhotoShelf: marketing uploads raw product photos, sometimes a whole
+  shoot of 200 at once; each one is resized to WebP sizes for the web shop,
+  whose pages load them on a public URL without signing in. A catalog manager
+  can take a photo off the shop.
+personas:
+  - {slug: marketing, does: uploads raw product photos for a product SKU and publishes them to the shop}
+  - {slug: catalog-manager, does: "takes photos off the shop and puts them back; also uploads like marketing"}
+requirements:
+  - id: R1
+    persona: marketing
+    volume: 200
+    text: Marketing uploads raw product photos, up to 200 in one batch; each one is resized to WebP sizes 320, 800 and 1600 pixels wide.
+    scenarios:
+      - {id: upload-resized, when: marketing uploads one JPEG photo 2000 pixels wide for a SKU, then: "the upload is accepted at once (202) and, within 30 seconds, the photo has three WebP sizes 320, 800 and 1600 pixels wide"}
+      - {id: batch-200, when: marketing uploads a batch of 200 photos in one action, then: every photo of the batch gets its WebP sizes exactly once and the batch reports 200 done}
+      - {id: never-upscaled, when: marketing uploads a photo 500 pixels wide, then: "only the 320 size is made; no size is wider than the original"}
+      - {id: not-an-image, when: marketing uploads a file that is not a JPEG or PNG image, then: the upload is refused with 422 in the error envelope and nothing is queued}
+  - id: R2
+    persona: marketing
+    text: The resized WebP images of the uploaded photos are served on a public URL for the shop pages; an anonymous browser loads them without signing in.
+    scenarios:
+      - {id: public-url, when: an anonymous browser opens the public URL of a resized photo, then: it receives the WebP bytes (200, image/webp) without any session}
+      - {id: shop-listing, when: an anonymous shop page asks for the photos of a SKU, then: it gets the public URLs of every resized photo of that SKU and none of another SKU}
+  - id: R3
+    persona: catalog-manager
+    text: A catalog manager takes a photo off the shop and can put it back; a photo taken off the shop is no longer listed and its public URLs stop answering.
+    scenarios:
+      - {id: take-off, when: a catalog manager takes a photo off the shop, then: the shop listing no longer shows it and its public URLs answer 404}
+      - {id: put-back, when: a catalog manager puts that photo back on the shop, then: its WebP sizes are made again and the public URLs answer 200}
+      - {id: marketing-cannot-take-off, when: a marketing user tries to take a photo off the shop, then: the API answers 403}
+  - id: R4
+    persona: marketing
+    text: Marketing and catalog managers sign in once with their company account; each persona only performs the actions of its role.
+    scenarios:
+      - {id: sso-login, when: a marketing user signs in through the company IdP, then: the app knows the user and their role}
+      - {id: anonymous-refused, when: someone calls the upload API without signing in, then: the API answers 401 in the error envelope}
+data:
+  - {entity: products (SKUs), volume: about 3000 SKUs}
+  - {entity: raw photos, volume: "about 1000 a week, in batches of up to 200", size: "up to 20 MB, JPEG or PNG"}
+  - {entity: resized sizes, volume: 3 WebP sizes per photo (320, 800, 1600 px wide), size: 20 to 400 KB each}
+never:
+  - a photo resized twice into the same size (a batch is processed exactly once, even with several workers)
+  - a size wider than its original (no upscaling)
+  - a photo taken off the shop still listed or still answering on its public URL
+  - the upload request waiting for the resizing
+out_of_scope:
+  - editing photos (cropping, colour, background removal)
+  - video
+  - the web shop itself (it only reads the listing and the public URLs)
+  - keeping the raw originals secret from anyone who knows their key (the bucket is public-read as a whole)
+  - a native mobile app
+answers:
+  R2-blob-size: binary WebP files, 20 to 400 KB each, many per photo → s3, public-read
+  R3-blob-size: the same WebP files as R2 (taking a photo off removes its objects) → s3

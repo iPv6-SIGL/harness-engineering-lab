@@ -1,0 +1,150 @@
+{
+  "app": "gearup",
+  "run": "run-20261103-112305",
+  "prompt_hash": "0b104f5ea863",
+  "tasks": [
+    {
+      "id": "1.1",
+      "title": "TEMPORAL_NS=1 APP=gearup ./bootstrap.sh",
+      "owner": "harness",
+      "scenarios": [
+        "C1 ready"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-11-03T11:43:31.365Z"
+    },
+    {
+      "id": "1.2",
+      "title": "OIDC client + 2 test personas (employee, manager)",
+      "owner": "harness",
+      "scenarios": [
+        "C1 oidc"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-11-03T11:43:31.498Z"
+    },
+    {
+      "id": "2.1",
+      "title": "Data model and seed (migrations in api/src/db.ts)",
+      "owner": "builder",
+      "scenarios": [
+        "R1 ask-waits"
+      ],
+      "passes": true,
+      "tries": 1,
+      "status": "passed",
+      "last_run": "2026-11-03T11:43:32.225Z"
+    },
+    {
+      "id": "3.1",
+      "title": "R1 · An employee asks for a laptop or other gear from the catalog; the manager has 3 days to approve, with a reminder after 2 days; without an answer the request expires and nothing is ordered.",
+      "owner": "builder",
+      "requirement": "R1",
+      "scenarios": [
+        "R1 ask-waits",
+        "R1 survives-restart",
+        "R1 one-open-per-item"
+      ],
+      "passes": true,
+      "tries": 1,
+      "status": "passed",
+      "last_run": "2026-11-03T11:43:35.806Z"
+    },
+    {
+      "id": "3.2",
+      "title": "R2 · The manager approves or rejects the request; an approved request is ordered from the supplier and its price is taken from the team budget; a request above the remaining budget cannot be approved.",
+      "owner": "builder",
+      "requirement": "R2",
+      "scenarios": [
+        "R2 approve-orders",
+        "R2 reject-closes",
+        "R2 over-budget",
+        "R2 employee-cannot-approve"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-11-03T11:43:36.796Z"
+    },
+    {
+      "id": "3.3",
+      "title": "R3 · When the supplier fails the order is cancelled and the budget refunded.",
+      "owner": "builder",
+      "requirement": "R3",
+      "scenarios": [
+        "R3 supplier-fails",
+        "R3 refund-once"
+      ],
+      "passes": true,
+      "tries": 1,
+      "status": "passed",
+      "last_run": "2026-11-03T11:43:41.643Z"
+    },
+    {
+      "id": "3.4",
+      "title": "R4 · Employees and managers sign in once with their company account; each persona only performs the actions of its role.",
+      "owner": "builder",
+      "requirement": "R4",
+      "scenarios": [
+        "R4 sso-login",
+        "R4 anonymous-refused"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-11-03T11:43:41.781Z"
+    },
+    {
+      "id": "4.1",
+      "title": "Screens: the persona journeys in frontend/",
+      "owner": "builder",
+      "scenarios": [
+        "C1 frontend"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-11-03T11:43:41.923Z"
+    },
+    {
+      "id": "5.1",
+      "title": "Contracts: /health, /ready, ports 8030–8031, SIGTERM < 10 s",
+      "owner": "builder",
+      "scenarios": [
+        "C1 health",
+        "C1 ready"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-11-03T11:43:42.062Z"
+    },
+    {
+      "id": "5.2",
+      "title": "Stateless API: no state in the process — a session survives an API restart, so a second replica can serve it",
+      "owner": "builder",
+      "scenarios": [
+        "C1 stateless"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-11-03T11:43:44.085Z"
+    }
+  ],
+  "gates": {
+    "spec": {
+      "approved": true,
+      "by": "Myth-F (in chat)",
+      "at": "2026-11-03T11:26:29.373Z",
+      "note": "bill, D1-D3 and the TEMPORAL_NS catalog fix reviewed"
+    },
+    "merge": {
+      "approved": false
+    }
+  }
+}

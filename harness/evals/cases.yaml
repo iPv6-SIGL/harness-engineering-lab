@@ -25,7 +25,7 @@ cases:
       requirements:
         - {id: R1, persona: employee, text: "An employee asks for a laptop; the manager has 3 days to approve, with a reminder after 2 days."}
         - {id: R2, persona: manager, text: "When the supplier fails the order is cancelled and the budget refunded."}
-    expect: {class: process, buy: [casdoor, temporal, temporal-ui, worker], refuse: [valkey, apisix, s3]}
+    expect: {class: process, buy: [casdoor, temporal, temporal-ui, worker], refuse: [valkey, apisix, s3], flags: [TEMPORAL_NS=1]}
 
   - name: askhr (RAG assistant)
     brief:
@@ -43,7 +43,7 @@ cases:
       requirements:
         - {id: R1, text: "Each new helpdesk ticket is triaged, finds similar solved tickets and gets a drafted reply."}
         - {id: R2, persona: support-agent, text: "The drafted reply waits for a human approval before it is sent."}
-    expect: {class: agent, buy: [casdoor, apisix, temporal, temporal-ui, worker], refuse: [valkey, umami]}
+    expect: {class: agent, buy: [casdoor, apisix, temporal, temporal-ui, worker], refuse: [valkey, umami], flags: [LLM_VKEY=1, TEMPORAL_NS=1]}
 
   - name: photoshelf (media)
     brief:

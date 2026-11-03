@@ -1,0 +1,14 @@
+# compiled from design.md D4 — the builder reads it, never edits it
+id: D4
+decision: Background work on a Valkey stream drained by a worker
+serves:
+  - R1
+  - R2
+owner: decide step · human-reviewed
+forbid_import: []
+forbid_pattern: []
+forbid_env: []
+forbid_service: []
+forbid_path: []
+forbid_flag: []
+witness: []
