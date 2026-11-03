@@ -122,26 +122,31 @@ export type PhotoState = {
   onShop: boolean;
   widths: number[];
   made: number[];
+  /** The worker could not decode it (a valid header over a corrupt body): nothing more will be made. */
+  failed?: boolean;
 };
 
 /** A photo is listed on the shop when it is on it AND every one of its sizes exists. */
 export function isListed(p: PhotoState): boolean {
-  return p.onShop && p.widths.length > 0 && p.widths.every((w) => p.made.includes(w));
+  return !p.failed && p.onShop && p.widths.length > 0 && p.widths.every((w) => p.made.includes(w));
 }
 
 /** The sizes still to make — what a (re)delivered stream message must do, and only that. */
 export function missingWidths(p: PhotoState): number[] {
-  if (!p.onShop) return [];
+  if (!p.onShop || p.failed) return [];
   return p.widths.filter((w) => !p.made.includes(w));
 }
 
+/** A failed photo counts as done: a batch always finishes, and says how many failed. */
 export function batchProgress(photos: PhotoState[]): {
   total: number;
   done: number;
+  failed: number;
   finished: boolean;
 } {
   const done = photos.filter((p) => missingWidths(p).length === 0).length;
-  return { total: photos.length, done, finished: done === photos.length };
+  const failed = photos.filter((p) => p.failed).length;
+  return { total: photos.length, done, failed, finished: done === photos.length };
 }
 
 /** Who may do what. A catalog manager also uploads like marketing (brief, personas). */

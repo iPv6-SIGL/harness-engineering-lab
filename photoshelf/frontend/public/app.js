@@ -82,7 +82,8 @@ async function watch(batchId) {
     if (!r.ok) return say(r.body?.error?.message ?? "lost the batch", "error");
     $("progress").max = r.body.batch.total;
     $("progress").value = r.body.batch.done;
-    say(`${r.body.batch.done} / ${r.body.batch.total} resized`);
+    const failed = r.body.batch.failed ? ` — ${r.body.batch.failed} unreadable, not published` : "";
+    say(`${r.body.batch.done} / ${r.body.batch.total} resized${failed}`, failed ? "error" : "info");
     if (r.body.batch.finished) break;
     await new Promise((ok) => setTimeout(ok, 1000));
   }

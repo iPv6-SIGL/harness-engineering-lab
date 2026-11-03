@@ -43,7 +43,7 @@ requirements:
 data:
   - {entity: products (SKUs), volume: about 3000 SKUs}
   - {entity: raw photos, volume: "about 1000 a week, in batches of up to 200", size: "up to 20 MB, JPEG or PNG"}
-  - {entity: resized sizes, volume: 3 WebP sizes per photo (320, 800, 1600 px wide), size: 20 to 400 KB each}
+  - {entity: resized sizes, volume: "3 WebP sizes per photo (320, 800, 1600 px wide)", size: 20 to 400 KB each}
 never:
   - a photo resized twice into the same size (a batch is processed exactly once, even with several workers)
   - a size wider than its original (no upscaling)

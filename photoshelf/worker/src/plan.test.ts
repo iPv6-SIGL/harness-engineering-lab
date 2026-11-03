@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { originalKey, parseEntries, renditionKey, sizesToMake } from "./plan";
+import { isUnreadable, originalKey, parseEntries, renditionKey, sizesToMake } from "./plan";
 
 describe("sizesToMake", () => {
   test("only the missing sizes, nothing for a photo off the shop", () => {
@@ -14,6 +14,18 @@ describe("keys match the API's", () => {
     expect(originalKey(3, "jpeg")).toBe("originals/3.jpg");
     expect(originalKey(3, "png")).toBe("originals/3.png");
     expect(renditionKey(3, 320)).toBe("photos/3/320.webp");
+  });
+});
+
+describe("isUnreadable: permanent decoding errors, not transient ones", () => {
+  test("a corrupt image is permanent", () => {
+    expect(isUnreadable(new Error("vipspng: libpng read error"))).toBe(true);
+    expect(isUnreadable("Input buffer contains unsupported image format")).toBe(true);
+    expect(isUnreadable(new Error("VipsJpeg: Premature end of input file"))).toBe(true);
+  });
+  test("the store or the database failing is transient", () => {
+    expect(isUnreadable(new Error("connect ECONNREFUSED 10.89.0.5:9000"))).toBe(false);
+    expect(isUnreadable(new Error("S3Error: SlowDown"))).toBe(false);
   });
 });
 

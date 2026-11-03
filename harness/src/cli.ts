@@ -183,7 +183,7 @@ function cmdFitness() {
 
 // ── verify ──────────────────────────────────────────────────────────────────
 function cmdWitness(appDir = resolve(args[0])) {
-  const ev = witness(loadGuards(appDir), ports(appDir));
+  const ev = witness(loadGuards(appDir), { ...ports(appDir), latencyBudgetMs: buildGraph().thresholds.latency_budget_ms });
   const l = readLedger(appDir);
   writeFileSync(join(runDir(appDir, l.run), "evidence.json"), `${JSON.stringify(ev, null, 2)}\n`);
   for (const e of ev) console.log(`  ${e.ok ? "✓" : "✗"} ${e.decision} — ${e.claim}: ${e.observed}`);

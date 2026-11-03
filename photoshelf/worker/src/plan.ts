@@ -9,6 +9,17 @@ export function sizesToMake(p: PhotoJob): number[] {
   return p.widths.filter((w) => !p.made.includes(w));
 }
 
+/**
+ * A decoding error is permanent (the bytes will never become an image): the
+ * message is acked and the photo marked failed. Anything else (the store, the
+ * database) is transient: the message stays pending and is retried.
+ */
+export function isUnreadable(err: unknown): boolean {
+  return /vips|unsupported image format|corrupt|premature end|read error|bad seek/i.test(
+    String(err),
+  );
+}
+
 export const originalKey = (photoId: number, format: string) =>
   `originals/${photoId}.${format === "jpeg" ? "jpg" : "png"}`;
 export const renditionKey = (photoId: number, width: number) => `photos/${photoId}/${width}.webp`;

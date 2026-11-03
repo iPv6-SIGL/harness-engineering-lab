@@ -21,6 +21,12 @@ function say(text, kind = "info") {
   $("message").className = kind;
 }
 
+/** The open requests first, then the 8 most recent: what a person acts on, not the whole history. */
+const recent = (requests) => [
+  ...requests.filter((r) => r.status === "waiting" || r.status === "approved"),
+  ...requests.filter((r) => r.status !== "waiting" && r.status !== "approved").slice(0, 8),
+];
+
 const eur = (cents) => `${(cents / 100).toLocaleString("en", { minimumFractionDigits: 2 })} EUR`;
 const day = (iso) => new Date(iso).toLocaleDateString("en", { day: "numeric", month: "short" });
 
@@ -68,7 +74,7 @@ async function render() {
   );
   const mine = await api("/api/v1/requests");
   $("mine").replaceChildren(
-    ...mine.body.requests.map((r) =>
+    ...recent(mine.body.requests).map((r) =>
       row(`${r.item.name} — asked ${day(r.createdAt)}, expires ${day(r.expiresAt)}`, badge(r)),
     ),
   );
@@ -76,7 +82,7 @@ async function render() {
   $("manager").hidden = false;
   const team = await api("/api/v1/requests?scope=team");
   $("team").replaceChildren(
-    ...team.body.requests.map((r) => {
+    ...recent(team.body.requests).map((r) => {
       const controls = [badge(r)];
       if (r.status === "waiting") {
         const decide = (approve) => async () => {

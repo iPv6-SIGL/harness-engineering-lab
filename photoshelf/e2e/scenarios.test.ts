@@ -111,6 +111,7 @@ describe("R1 · uploads resized to WebP by the worker", () => {
       sku,
       total: 200,
       done: 200,
+      failed: 0,
       finished: true,
     });
     // Exactly once: each photo has its one size, recorded once (renditions' primary key).

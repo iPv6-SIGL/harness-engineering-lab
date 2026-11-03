@@ -28,6 +28,10 @@ export async function migrate(pool: Db) {
     await sql`CREATE TABLE IF NOT EXISTS renditions (
       photo_id int NOT NULL REFERENCES photos(id), width int NOT NULL, bytes int NOT NULL,
       made_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (photo_id, width))`;
+    // A photo the worker cannot decode (valid header, corrupt body): recorded once, then acked.
+    await sql`CREATE TABLE IF NOT EXISTS photo_failures (
+      photo_id int PRIMARY KEY REFERENCES photos(id), reason text NOT NULL,
+      failed_at timestamptz NOT NULL DEFAULT now())`;
     await sql`CREATE TABLE IF NOT EXISTS sessions (
       token text PRIMARY KEY, sub text NOT NULL, name text NOT NULL, roles text[] NOT NULL, expires_at timestamptz NOT NULL)`;
     await sql`CREATE TABLE IF NOT EXISTS oauth_states (state text PRIMARY KEY, created_at timestamptz NOT NULL DEFAULT now())`;
@@ -45,6 +49,7 @@ export type PhotoRow = {
   widths: number[];
   on_shop: boolean;
   made: number[];
+  failed: boolean;
 };
 
 /** Photos with the widths already made, as the domain reads them. */
@@ -55,7 +60,8 @@ export async function photos(
   const rows = await sql`
     SELECT p.id, p.batch_id, p.sku, p.name, p.format, p.width, p.height,
            array_to_string(p.widths, ',') AS widths, p.on_shop,
-           coalesce((SELECT string_agg(r.width::text, ',' ORDER BY r.width) FROM renditions r WHERE r.photo_id = p.id), '') AS made
+           coalesce((SELECT string_agg(r.width::text, ',' ORDER BY r.width) FROM renditions r WHERE r.photo_id = p.id), '') AS made,
+           EXISTS (SELECT 1 FROM photo_failures f WHERE f.photo_id = p.id) AS failed
     FROM photos p
     WHERE (${where.sku ?? null}::text IS NULL OR p.sku = ${where.sku ?? null}::text)
       AND (${where.batchId ?? null}::int IS NULL OR p.batch_id = ${where.batchId ?? null}::int)

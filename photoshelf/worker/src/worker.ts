@@ -5,7 +5,14 @@
 // Health on :8081 (/health, /ready); SIGTERM finishes the messages in hand.
 import { RedisClient, S3Client, SQL } from "bun";
 import sharp from "sharp";
-import { originalKey, parseEntries, renditionKey, type StreamEntry, sizesToMake } from "./plan";
+import {
+  isUnreadable,
+  originalKey,
+  parseEntries,
+  renditionKey,
+  type StreamEntry,
+  sizesToMake,
+} from "./plan";
 
 const VAULT_ADDR = Bun.env.VAULT_ADDR ?? "http://openbao.internal:8200";
 const VAULT_TOKEN = Bun.env.VAULT_TOKEN ?? "root-dev-token";
@@ -58,17 +65,31 @@ try {
   if (!String(e).includes("BUSYGROUP")) throw e;
 }
 
-type Row = { format: string; widths: string; on_shop: boolean; made: string };
+type Row = { format: string; widths: string; on_shop: boolean; made: string; failed: boolean };
 const ints = (s: string) => (s ? s.split(",").map(Number) : []);
 
 async function photo(id: number) {
   const [r]: Row[] = await sql`
     SELECT p.format, array_to_string(p.widths, ',') AS widths, p.on_shop,
-           coalesce((SELECT string_agg(width::text, ',') FROM renditions WHERE photo_id = p.id), '') AS made
+           coalesce((SELECT string_agg(width::text, ',') FROM renditions WHERE photo_id = p.id), '') AS made,
+           EXISTS (SELECT 1 FROM photo_failures f WHERE f.photo_id = p.id) AS failed
     FROM photos p WHERE p.id = ${id}`;
   return r
-    ? { format: r.format, onShop: r.on_shop, widths: ints(r.widths), made: ints(r.made) }
+    ? {
+        format: r.format,
+        onShop: r.on_shop && !r.failed, // a failed photo has nothing left to make
+        widths: ints(r.widths),
+        made: ints(r.made),
+      }
     : null;
+}
+
+/** A permanent failure: recorded once, acked, so the batch finishes and nothing is retried forever. */
+async function giveUp(e: StreamEntry, err: unknown) {
+  await sql`INSERT INTO photo_failures (photo_id, reason) VALUES (${e.photoId}, ${String(err).slice(0, 300)})
+            ON CONFLICT (photo_id) DO NOTHING`;
+  await writer.send("XACK", [STREAM, GROUP, e.id]);
+  log("warn", "photo unreadable: marked failed", { photo: e.photoId, error: String(err) });
 }
 
 async function handle(e: StreamEntry) {
@@ -139,8 +160,10 @@ async function loop() {
       await Promise.all(
         entries.map((e) =>
           handle(e).catch((err) =>
-            // Not acked: the message stays pending and is reclaimed after a minute.
-            log("error", "resize failed", { photo: e.photoId, error: String(err) }),
+            isUnreadable(err)
+              ? giveUp(e, err)
+              : // Transient: not acked, the message stays pending and is reclaimed after a minute.
+                log("error", "resize failed", { photo: e.photoId, error: String(err) }),
           ),
         ),
       );

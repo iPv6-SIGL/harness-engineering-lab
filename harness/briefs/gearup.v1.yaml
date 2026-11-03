@@ -41,9 +41,9 @@ requirements:
       - {id: anonymous-refused, when: someone calls the API without signing in, then: the API answers 401 in the error envelope}
 data:
   - {entity: employees, volume: about 300 in 30 teams}
-  - {entity: catalog items, volume: about 20 (laptops, screens, headsets, docks)}
-  - {entity: requests, volume: about 40 a week, each open for at most 3 days}
-  - {entity: team budgets, volume: one per team, about 15000 EUR a year}
+  - {entity: catalog items, volume: "about 20 (laptops, screens, headsets, docks)"}
+  - {entity: requests, volume: "about 40 a week, each open for at most 3 days"}
+  - {entity: team budgets, volume: "one per team, about 15000 EUR a year"}
 never:
   - an order placed without the manager's approval
   - an order placed after its request expired or was rejected

@@ -246,9 +246,28 @@ describe("listing, what is left to make, batch progress", () => {
     expect(batchProgress([p(), p({ made: [320] })])).toEqual({
       total: 2,
       done: 1,
+      failed: 0,
       finished: false,
     });
-    expect(batchProgress([p(), p()])).toEqual({ total: 2, done: 2, finished: true });
+    expect(batchProgress([p(), p()])).toEqual({ total: 2, done: 2, failed: 0, finished: true });
+  });
+  test("an undecodable photo: never listed, nothing left to make, the batch still finishes", () => {
+    const broken = p({ made: [], failed: true });
+    expect(isListed(p({ failed: true }))).toBe(false);
+    expect(isListed(p({ failed: false }))).toBe(true);
+    expect(missingWidths(broken)).toEqual([]);
+    expect(batchProgress([p(), broken, p({ made: [320] })])).toEqual({
+      total: 3,
+      done: 2,
+      failed: 1,
+      finished: false,
+    });
+    expect(batchProgress([broken, broken])).toEqual({
+      total: 2,
+      done: 2,
+      failed: 2,
+      finished: true,
+    });
   });
 });
 

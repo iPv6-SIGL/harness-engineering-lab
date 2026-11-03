@@ -126,8 +126,9 @@ const view = (p: PhotoRow) => ({
   height: p.height,
   widths: p.widths,
   made: p.made,
+  failed: p.failed,
   onShop: p.on_shop,
-  listed: isListed({ onShop: p.on_shop, widths: p.widths, made: p.made }),
+  listed: isListed({ onShop: p.on_shop, widths: p.widths, made: p.made, failed: p.failed }),
   sizes: p.made.map((w) => ({
     width: w,
     url: publicUrl(cfg.s3.publicBase, cfg.s3.bucket, p.id, w),
@@ -139,7 +140,7 @@ async function getBatch(req: Request, id: number): Promise<Response> {
   const rows = await photos(sql, { batchId: id });
   if (rows.length === 0) return fail(404, "unknown-batch", "no such batch");
   const progress = batchProgress(
-    rows.map((p) => ({ onShop: p.on_shop, widths: p.widths, made: p.made })),
+    rows.map((p) => ({ onShop: p.on_shop, widths: p.widths, made: p.made, failed: p.failed })),
   );
   return json({ batch: { id, sku: rows[0].sku, ...progress }, photos: rows.map(view) });
 }
@@ -155,7 +156,7 @@ async function listPhotos(req: Request, url: URL): Promise<Response> {
 async function shopListing(sku: string): Promise<Response> {
   if (!isSku(sku)) return fail(422, "invalid-sku", "sku is 3 to 32 letters, digits or dashes");
   const listed = (await photos(sql, { sku })).filter((p) =>
-    isListed({ onShop: p.on_shop, widths: p.widths, made: p.made }),
+    isListed({ onShop: p.on_shop, widths: p.widths, made: p.made, failed: p.failed }),
   );
   return json({
     sku,
@@ -212,6 +213,10 @@ async function route(req: Request, url: URL): Promise<Response> {
   return fail(404, "not-found", `${m} ${p}`);
 }
 
+/** The route template of a path (ids replaced), as the measurement contract (p99.ts) groups requests. */
+const routeOf = (path: string) =>
+  path.replace(/\/\d+(?=\/|$)/g, "/:id").replace(/^\/api\/v1\/shop\/[^/]+/, "/api/v1/shop/:sku");
+
 const server = Bun.serve({
   port: 8080,
   maxRequestBodySize: 256 * 1024 * 1024, // a batch: up to 200 photos (nginx caps it the same)
@@ -237,9 +242,9 @@ const server = Bun.serve({
       JSON.stringify({
         level: "info",
         method: req.method,
-        path: url.pathname,
+        route: routeOf(url.pathname),
         status: res.status,
-        ms: Math.round(performance.now() - t0),
+        duration_ms: Math.round(performance.now() - t0),
       }),
     );
     return res;

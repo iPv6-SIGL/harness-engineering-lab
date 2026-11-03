@@ -62,18 +62,7 @@ ak "$IDP_URL/api/get-users?owner=built-in" | api_ok \
 # The application is OWNED by `admin`, so its id is `admin/<app>` — not
 # `built-in/<app>` (the organization), which always reads back as null.
 FOUND="$(ak "$IDP_URL/api/get-application?id=admin/$APP" || echo '{"data":null}')"
-if [ "$(jsonget "$FOUND" "d.get('data')")" != "None" ]; then
-  # keep the redirect URI in sync — rerunning with a new one updates it
-  # update-application REPLACES the record: send the one read back, with only the
-  # redirect URI changed — a partial body would wipe the client id/secret.
-  # ⚠ expireInHours: an application created without it gets 0 — every token is
-  #   issued ALREADY EXPIRED (exp == iat) and /api/userinfo refuses it. Healed here.
-  UPDATED="$(python3 -c 'import json,sys;d=json.loads(sys.argv[1])["data"];d["redirectUris"]=[sys.argv[2]];d["expireInHours"]=d.get("expireInHours") or 1;d["refreshExpireInHours"]=d.get("refreshExpireInHours") or 24;print(json.dumps(d))' "$FOUND" "$REDIRECT")"
-  ak -X POST "$IDP_URL/api/update-application?id=admin/$APP" -d "$UPDATED" | api_ok \
-    || { echo "[oidc] ✗ could not update the application '$APP'" >&2; exit 1; }
-  echo "[oidc] the application '$APP' already exists — redirect URI refreshed"
-  PROV="$FOUND"
-else
+if [ "$(jsonget "$FOUND" "d.get('data')")" = "None" ]; then
   CREATED="$(ak -X POST "$IDP_URL/api/add-application" -d "{
     \"owner\": \"admin\", \"name\": \"$APP\", \"displayName\": \"$APP\",
     \"organization\": \"built-in\", \"grantTypes\": [\"authorization_code\"],
@@ -81,8 +70,38 @@ else
   }")"
   api_ok <<<"$CREATED" || { echo "[oidc] ✗ could not create the application '$APP': $CREATED" >&2; exit 1; }
   echo "[oidc] the application '$APP' was created"
-  PROV="$(ak "$IDP_URL/api/get-application?id=admin/$APP")"
+  FOUND="$(ak "$IDP_URL/api/get-application?id=admin/$APP")"
 fi
+
+# Then always rewrite it whole, healed. update-application REPLACES the record:
+# send the one read back, never a partial body (it would wipe the client
+# id/secret). What is healed, and why:
+# ⚠ redirectUris: kept in sync — rerunning with a new one updates it.
+# ⚠ expireInHours: an application created without it gets 0 — every token is
+#   issued ALREADY EXPIRED (exp == iat) and /api/userinfo refuses it.
+# ⚠ the sign-in page: an application created through the API gets
+#   signinMethods = [Face ID] only, enablePassword = false and providers /
+#   signupItems = null — Casdoor's login page then calls .find() on null and
+#   renders BLANK (the API login the e2e tests use still works, which hid it).
+#   The sign-in fields are copied from Casdoor's own `app-built-in`.
+BUILTIN="$(ak "$IDP_URL/api/get-application?id=admin/app-built-in")"
+UPDATED="$(python3 -c '
+import json, sys
+d = json.loads(sys.argv[1])["data"]
+b = (json.loads(sys.argv[3]).get("data") or {})
+d["redirectUris"] = [sys.argv[2]]
+d["expireInHours"] = d.get("expireInHours") or 1
+d["refreshExpireInHours"] = d.get("refreshExpireInHours") or 24
+d["enablePassword"] = True
+d["signinMethods"] = b.get("signinMethods") or [{"name": "Password", "displayName": "Password", "rule": "All"}]
+for k in ("signinItems", "signupItems", "providers", "tags", "tokenFields"):
+    if not d.get(k):
+        d[k] = b.get(k) or []
+print(json.dumps(d))' "$FOUND" "$REDIRECT" "$BUILTIN")"
+ak -X POST "$IDP_URL/api/update-application?id=admin/$APP" -d "$UPDATED" | api_ok \
+  || { echo "[oidc] ✗ could not update the application '$APP'" >&2; exit 1; }
+echo "[oidc] the application '$APP' is ready — redirect URI and sign-in page in sync"
+PROV="$FOUND"
 
 # --- the app's runtime config -------------------------------------------------
 CLIENT_ID_APP="$(jsonget "$PROV" "d['data']['clientId']")"
