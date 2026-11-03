@@ -16,7 +16,50 @@ function sh(cmd: string): { code: number; out: string } {
 const bao = (args: string) => sh(`podman exec -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=root-dev-token openbao.internal bao ${args}`);
 const httpCode = (url: string) => sh(`curl -s -o /dev/null -w '%{http_code}' -m 5 '${url}'`).out;
 
-type Ctx = { app: string; apiPort: number; frontendPort: number };
+type Ctx = { app: string; apiPort: number; frontendPort: number; latencyBudgetMs?: number };
+
+export type RouteLatency = { route: string; n: number; p99: number };
+
+/** Same percentile as core-platform/templates/p99.ts: the value at rank ceil(p·n). */
+export function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  return sorted[Math.max(0, Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1))];
+}
+
+/**
+ * p99 per route from the API's request log — the CCoE measurement contract
+ * (one JSON line per request with `route` and `duration_ms`, read by p99.ts).
+ * The platform's own probes (/health, /ready) are not the app's routes.
+ */
+export function latencyByRoute(lines: string[]): RouteLatency[] {
+  const by = new Map<string, number[]>();
+  for (const line of lines) {
+    const start = line.indexOf("{");
+    if (start < 0) continue;
+    let e: Record<string, unknown>;
+    try {
+      e = JSON.parse(line.slice(start));
+    } catch {
+      continue;
+    }
+    if (typeof e.route !== "string" || typeof e.duration_ms !== "number") continue;
+    if (e.route === "/health" || e.route === "/ready") continue;
+    const key = `${typeof e.method === "string" ? e.method : "?"} ${e.route}`;
+    by.set(key, [...(by.get(key) ?? []), e.duration_ms]);
+  }
+  return [...by.entries()]
+    .map(([route, d]) => ({ route, n: d.length, p99: percentile(d.sort((a, b) => a - b), 99) }))
+    .sort((a, b) => b.p99 - a.p99);
+}
+
+/** The latency claim: every route's p99 within the request budget (criteria.yaml → latency_budget_ms). */
+export function latencyClaim(rows: RouteLatency[], budgetMs: number): Evidence {
+  const worst = rows[0];
+  const observed = worst
+    ? `worst p99 ${worst.route} ${worst.p99} ms (n=${worst.n}) over ${rows.length} routes`
+    : "no request log line with route + duration_ms: the API breaks the measurement contract";
+  return { claim: `API p99 ≤ ${budgetMs} ms on every route`, decision: "contract", probe: "request log p99", expect: `≤ ${budgetMs} ms`, observed, ok: !!worst && worst.p99 <= budgetMs };
+}
 
 const PROBES: Record<string, (c: Ctx, detail?: string) => { observed: string; present: boolean }> = {
   "valkey-keys": ({ app }) => {
@@ -76,6 +119,9 @@ export function contractClaims(c: Ctx): Evidence[] {
   out.push({ claim: `the api connects as DB user ${c.app}`, decision: "contract", probe: "pg_stat_activity", expect: "≥ 1", observed: `${sessions} sessions of ${c.app}`, ok: sessions > 0 });
   const logs = sh(`podman logs --tail 50 ${c.app}-api 2>&1 | wc -l`);
   out.push({ claim: "logs on stdout (Dozzle)", decision: "contract", probe: "podman logs", expect: "> 0 lines", observed: `${logs.out} lines`, ok: Number(logs.out) > 0 });
+  // Read BEFORE the SIGTERM probe below: the requests the scenarios just made are the sample.
+  const requests = Bun.spawnSync(["podman", "logs", "--tail", "5000", `${c.app}-api`]);
+  out.push(latencyClaim(latencyByRoute(`${requests.stdout}${requests.stderr}`.split("\n")), c.latencyBudgetMs ?? 350));
   // SIGTERM: drain and exit under 10 s, then come back.
   const t0 = Date.now();
   sh(`podman stop -t 10 ${c.app}-api`);

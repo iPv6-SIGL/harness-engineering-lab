@@ -1,0 +1,10 @@
+harness   42/46   91 %  ✓ ≥ 70 %  survivors: L128 -→+, L158 +→-, L158 60→61, L159 true→false
+desk1     36/66   55 %  ✗ < 70 %  survivors: L13 400→401, L20 <→<=, L24 ||→&&, L32 <=→<
+desk2     22/41   54 %  ✗ < 70 %  survivors: L3 52→53, L17 <→<=, L43 true→false, L43 false→true
+desk3     19/38   50 %  ✗ < 70 %  survivors: L2 3600→3601, L2 1000→1001, L26 24→25, L26 3600→3601
+spec1     24/51   47 %  ✗ < 70 %  survivors: L20 1024→1025, L23 ===→!==, L23 ===→!==, L27 ||→&&
+spec2     51/73   70 %  ✗ < 70 %  survivors: L24 ||→&&, L24 false→true, L26 &&→||, L53 <→<=
+pay2      33/46   72 %  ✓ ≥ 70 %  survivors: L21 ===→!==, L21 &&→||, L21 +→-, L21 1→2
+gear1     11/21   52 %  ✗ < 70 %  survivors: L2 72→73, L3 48→49, L8 true→false, L8 false→true
+gear2     12/19   63 %  ✗ < 70 %  survivors: L12 1200→1201, L13 2400→2401, L16 10000→10001, L20 true→false
+pay1      40/61   66 %  ✗ < 70 %  survivors: L3 20000→20001, L38 1→2, L38 9→10, L38 2→3

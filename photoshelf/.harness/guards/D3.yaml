@@ -1,0 +1,13 @@
+# compiled from design.md D3 — the builder reads it, never edits it
+id: D3
+decision: "Anonymous read on the app's bucket only"
+serves:
+  - R2
+owner: decide step · human-reviewed
+forbid_import: []
+forbid_pattern: []
+forbid_env: []
+forbid_service: []
+forbid_path: []
+forbid_flag: []
+witness: []

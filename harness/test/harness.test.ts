@@ -10,6 +10,7 @@ import { checkCommand, checkContent, checkTopology } from "../src/guards";
 import { sites } from "../src/mutants";
 import { type Brief, needTest, rx } from "../src/needs";
 import { composeYml, gitlabCiYml, portBlock } from "../src/scaffold";
+import { latencyByRoute, latencyClaim, percentile } from "../src/witness";
 
 const HERE = import.meta.dir;
 const g = buildGraph();
@@ -166,6 +167,37 @@ describe("ports and French briefs (audit findings)", () => {
     expect(r.exitCode).toBe(2);
     const ok = Bun.spawnSync(["bun", join(HERE, "../hooks/guard.ts")], { stdin: Buffer.from(JSON.stringify({ cwd: repo, tool_name: "Bash", tool_input: { command: "cd harness && bun add zod" } })) });
     expect(ok.exitCode).toBe(0);
+  });
+});
+
+describe("latency (step 11): the p99 of the API's own request log", () => {
+  const line = (route: string, ms: number, method = "GET") => `2026-11-03T12:00:00Z ${JSON.stringify({ level: "info", method, route, status: 200, duration_ms: ms })}`;
+  test("p99 per route, the platform's probes and malformed lines left out", () => {
+    const lines = [
+      ...Array.from({ length: 99 }, () => line("/api/v1/me", 5)),
+      line("/api/v1/me", 400),
+      line("/ready", 9000),
+      line("/health", 9000),
+      "not json",
+      '{"level":"info","path":"/api/v1/me","ms":3}', // the old field names: not the contract
+      line("/api/v1/batches", 120, "POST"),
+    ];
+    expect(latencyByRoute(lines)).toEqual([
+      { route: "POST /api/v1/batches", n: 1, p99: 120 },
+      { route: "GET /api/v1/me", n: 100, p99: 5 },
+    ]);
+  });
+  test("one slow request in a hundred is the p99", () => {
+    expect(percentile([1, 2, 3], 99)).toBe(3);
+    expect(percentile([], 99)).toBe(0);
+    const rows = latencyByRoute([...Array.from({ length: 98 }, () => line("/x", 10)), line("/x", 500), line("/x", 600)]);
+    expect(rows[0].p99).toBe(500);
+  });
+  test("green within the budget, red above it, red when the API logs nothing measurable", () => {
+    expect(latencyClaim([{ route: "GET /x", n: 3, p99: 350 }], 350).ok).toBe(true);
+    const slow = latencyClaim([{ route: "POST /y", n: 4, p99: 351 }, { route: "GET /x", n: 3, p99: 10 }], 350);
+    expect(slow).toMatchObject({ ok: false, observed: "worst p99 POST /y 351 ms (n=4) over 2 routes" });
+    expect(latencyClaim([], 350).ok).toBe(false);
   });
 });
 

@@ -11,7 +11,7 @@ import { dirname, join, resolve } from "node:path";
 import { buildGraph, type Graph } from "../src/catalog";
 import { type Brief, needTest, ownedBricks } from "../src/needs";
 
-type Expect = { class?: string; buy?: string[]; refuse?: string[]; points?: number; flags?: string[]; unsupported?: string[]; vetoed?: string[] };
+type Expect = { class?: string; buy?: string[]; refuse?: string[]; points?: number; flags?: string[]; unsupported?: string[]; vetoed?: string[]; gaps?: string[] };
 type Case = { name: string; brief: Brief | string; expect: Expect };
 
 const HERE = import.meta.dir;
@@ -40,6 +40,10 @@ export function judge(g: Graph, brief: Brief, e: Expect, disabledRules: string[]
   if (e.points !== undefined && bill.points !== e.points) miss.push(`${bill.points} points ≠ ${e.points}`);
   for (const f of e.flags ?? []) if (!bill.flags.includes(f)) miss.push(`flag ${f} missing`);
   for (const v of e.vetoed ?? []) if (!bill.vetoed.some((x) => `${x.need}@${x.requirement}` === v)) miss.push(`decision log lost the veto ${v}`);
+  if (e.gaps) {
+    const got = [...new Set(bill.gaps.map((x) => x.id))].sort().join(",");
+    if (got !== [...e.gaps].sort().join(",")) miss.push(`gaps [${got}] ≠ [${e.gaps.join(",")}]`);
+  }
   return miss;
 }
 
@@ -56,6 +60,7 @@ export function allRules(g: Graph): string[] {
     ...Object.keys(g.vetoes),
     ...Object.values(g.needs).flatMap((n) => (n.signals ?? []).map((s) => s.id)),
     ...g.unsupported.map((u) => u.id),
+    ...g.gaps.map((x) => x.id),
     "identity",
   ];
 }

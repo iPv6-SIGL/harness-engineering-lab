@@ -1,0 +1,78 @@
+:root {
+  color-scheme: light dark;
+  --ink: #1d2433;
+  --ground: #f7f8fb;
+  --line: #c9ced8;
+  --ok: #2f7d4f;
+  --wait: #8a6d1f;
+  --error: #b3261e;
+  font-family: system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e6e9ef;
+    --ground: #151922;
+    --line: #3a4150;
+  }
+}
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+}
+header {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+header h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  margin-right: auto;
+}
+main {
+  padding: 1rem;
+  max-width: 56rem;
+  margin: 0 auto;
+}
+.rows {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+.rows li {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
+.rows li span:first-child {
+  margin-right: auto;
+}
+.badge {
+  font-size: 0.85rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 1rem;
+  border: 1px solid currentColor;
+}
+.badge.waiting,
+.badge.approved {
+  color: var(--wait);
+}
+.badge.ordered {
+  color: var(--ok);
+}
+.badge.cancelled,
+.badge.expired,
+.badge.rejected,
+.badge.due {
+  color: var(--error);
+}
+#message.error {
+  color: var(--error);
+}

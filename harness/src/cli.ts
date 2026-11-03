@@ -95,7 +95,7 @@ function cmdPlan() {
   writeFileSync(join(change, "design.md"), designMd(brief, bill, decisions, g, run));
   writeFileSync(join(change, "tasks.md"), tasksMd(brief, tasks));
   writeFileSync(join(change, "specs", brief.app, "spec.md"), specMd(brief));
-  writeFileSync(join(appDir, ".harness", "bill.yaml"), y({ app: bill.app, class: bill.class, budget: bill.budget, total: bill.points, within_budget: bill.within_budget, scaffold: bill.scaffold, bought: bill.bought, refused: bill.refused, flags: bill.flags, needs: bill.needs }));
+  writeFileSync(join(appDir, ".harness", "bill.yaml"), y({ app: bill.app, class: bill.class, budget: bill.budget, total: bill.points, within_budget: bill.within_budget, scaffold: bill.scaffold, bought: bill.bought, refused: bill.refused, flags: bill.flags, gaps: bill.gaps, needs: bill.needs }));
   for (const d of decisions) writeFileSync(join(appDir, ".harness", "guards", `${d.id}.yaml`), `# compiled from design.md ${d.id} — the builder reads it, never edits it\n${y(d.guard)}`);
   writeFileSync(join(appDir, ".harness", "decisions.yaml"), `# the decision log, machine-readable — archived at step 15 into openspec/specs/${brief.app}/decisions.md\n${y(decisions)}`);
   const ledger: Ledger = { app: brief.app, run, prompt_hash: sha(brief.prompt), tasks: tasks.map((t) => ({ ...t, passes: false, tries: 0, status: "open" })), gates: { spec: { approved: false }, merge: { approved: false } } };
@@ -107,6 +107,7 @@ function cmdPlan() {
   console.log(`  scaffold ${bill.scaffold.join(", ")}`);
   for (const b of bill.bought) console.log(`  + ${b.brick} (${b.points}) paid by ${b.paid_by.join(", ")} for ${b.needs.join(", ")}`);
   for (const r of bill.refused) console.log(`  − ${r.brick} (${r.points}) ${r.reason}`);
+  for (const x of bill.gaps) console.log(`  ! ${x.id} (${x.requirement}) ${x.why}`);
   for (const d of decisions) console.log(`  ${d.id} · ${d.title} — serves ${d.serves.join(", ")}`);
   console.log(`desired state written: openspec/changes/add-${brief.app}/ · .harness/ · scaffold. Step 5 waits for a human: harness approve ${appDir} spec --by <name>`);
 }
@@ -118,12 +119,13 @@ function cmdApprove() {
   const by = flag("by") ?? die("--by <human> is required: a gate is a person");
   const l = readLedger(appDir);
   const bill = Bun.YAML.parse(readFileSync(join(appDir, ".harness", "bill.yaml"), "utf8")) as any;
+  if (gate === "spec" && bill.gaps?.length && !flag("ack-gap")) die(`platform gap${bill.gaps.length > 1 ? "s" : ""}: ${bill.gaps.map((x: any) => `${x.id} (${x.requirement})`).join(", ")} — no brick exists for it. Approve only with --ack-gap "<who decides the channel, by when>": the CCoE fills it, the builder never does`);
   if (gate === "spec" && !bill.within_budget && !flag("waiver")) die(`over budget (${bill.total}/${bill.budget}): approve with --waiver "<reason, expiry>" — it lands in the README's CCoE waivers`);
   if (gate === "merge") {
     const v = join(runDir(appDir, l.run), "verdicts.json");
     if (!existsSync(v) || JSON.parse(readFileSync(v, "utf8")).verdict !== "green") die("merge gate: run `harness reconcile` first — the verdict must be green");
   }
-  l.gates[gate] = { approved: true, by, at: new Date().toISOString(), note: flag("note") ?? flag("waiver") };
+  l.gates[gate] = { approved: true, by, at: new Date().toISOString(), note: flag("note") ?? flag("waiver") ?? flag("ack-gap") };
   writeLedger(appDir, l);
   logEvent(appDir, l.run, gate === "spec" ? 5 : 14, `gate:${gate}`, { by, note: flag("note"), waiver: flag("waiver") });
   console.log(`gate ${gate} approved by ${by}`);
@@ -181,7 +183,7 @@ function cmdFitness() {
 
 // ── verify ──────────────────────────────────────────────────────────────────
 function cmdWitness(appDir = resolve(args[0])) {
-  const ev = witness(loadGuards(appDir), ports(appDir));
+  const ev = witness(loadGuards(appDir), { ...ports(appDir), latencyBudgetMs: buildGraph().thresholds.latency_budget_ms });
   const l = readLedger(appDir);
   writeFileSync(join(runDir(appDir, l.run), "evidence.json"), `${JSON.stringify(ev, null, 2)}\n`);
   for (const e of ev) console.log(`  ${e.ok ? "✓" : "✗"} ${e.decision} — ${e.claim}: ${e.observed}`);

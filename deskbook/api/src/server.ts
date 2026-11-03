@@ -204,6 +204,9 @@ async function route(req: Request, url: URL): Promise<Response> {
   return fail(404, "not-found", `${m} ${p}`);
 }
 
+/** The route template of a path (ids replaced), as the measurement contract (p99.ts) groups requests. */
+const routeOf = (path: string) => path.replace(/\/\d+(?=\/|$)/g, "/:id");
+
 const server = Bun.serve({
   port: 8080,
   async fetch(req, srv) {
@@ -228,9 +231,9 @@ const server = Bun.serve({
       JSON.stringify({
         level: "info",
         method: req.method,
-        path: url.pathname,
+        route: routeOf(url.pathname),
         status: res.status,
-        ms: Math.round(performance.now() - t0),
+        duration_ms: Math.round(performance.now() - t0),
       }),
     );
     return res;

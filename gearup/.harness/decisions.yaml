@@ -1,0 +1,123 @@
+# the decision log, machine-readable — archived at step 15 into openspec/specs/gearup/decisions.md
+- id: D1
+  title: Identity through casdoor (OIDC)
+  serves:
+    &serves
+    - R1
+    - R2
+    - R3
+    - R4
+  chose: "one OIDC client, one group per persona, roles checked server-side"
+  rejected: a users table in the app (a second user store)
+  avoids: "password storage, reset flows, a login screen to secure"
+  revisit_when: "a persona must act without a company account (visitors, partners) — that is a new persona and a new group, not a users table"
+  scales_by: "sessions live in Postgres, so any API replica serves any user; the IdP is shared and scales with the platform"
+  bricks:
+    - casdoor
+  guard:
+    id: D1
+    decision: Identity through casdoor (OIDC)
+    serves:
+      *serves
+    owner: decide step · human-reviewed
+    forbid_import: []
+    forbid_pattern: []
+    forbid_env: []
+    forbid_service: []
+    forbid_path: []
+    forbid_flag: []
+    witness:
+      - probe: secret-read
+        expect: present
+        detail: secret/gearup/oidc
+- id: D2
+  title: A Temporal workflow per long-running process
+  serves:
+    &serves1
+    - R1
+    - R2
+    - R3
+  chose: "one namespace, timers and signals, compensation as activities"
+  rejected: status columns polled by a cron
+  avoids: "lost state on restart, hand-written retry and reminder loops"
+  revisit_when: the waits disappear from the requirements — a workflow that never waits is a function call
+  scales_by: "add worker replicas on the task queue; workflow history is the platform's, versioned on every deploy"
+  bricks:
+    - temporal
+    - temporal-ui
+    - worker
+  guard:
+    id: D2
+    decision: A Temporal workflow per long-running process
+    serves:
+      *serves1
+    owner: decide step · human-reviewed
+    forbid_import: []
+    forbid_pattern: []
+    forbid_env: []
+    forbid_service: []
+    forbid_path: []
+    forbid_flag: []
+    witness: []
+- id: D3
+  title: Nothing unasked
+  serves:
+    - "*"
+  chose: "stay out: valkey, s3, apisix, umami — no requirement emits a signal for them"
+  rejected: "valkey \"in case\", s3 \"in case\", apisix \"in case\", umami \"in case\""
+  avoids: "5 ops points: [object Object], a stream + consumer group to watch, memory; 1 bucket + 1 scoped key; 1 virtual key, a token budget, provider quirks, evals; 1 website, a beacon proxied first-party, a privacy register entry"
+  revisit_when: "valkey: fan out N independent units to competing consumers; s3: binary files or objects above 1 MB; apisix: the app generates, classifies, summarises or embeds text; umami: a usage metric is named in the brief"
+  scales_by: "nothing to scale: what does not run costs nothing"
+  bricks:
+    - valkey
+    - s3
+    - apisix
+    - umami
+  guard:
+    id: D3
+    decision: Nothing unasked
+    serves:
+      - "*"
+    owner: decide step · human-reviewed
+    forbid_import:
+      - ioredis
+      - redis
+      - bullmq
+      - "@valkey/valkey-glide"
+      - bee-queue
+      - "@aws-sdk/client-s3"
+      - minio
+      - openai
+      - "@anthropic-ai/sdk"
+      - ai
+      - "@ai-sdk/openai"
+      - langchain
+    forbid_pattern:
+      - Bun\.RedisClient
+      - new RedisClient
+      - redis://
+      - valkey\.internal
+      - Bun\.S3Client
+      - \bS3Client\b
+      - "@aws-sdk/client-s3"
+      - llm\.internal
+      - api\.openai\.com
+      - api\.anthropic\.com
+      - task:(cheap|quality|vision|reasoning|embed|image)
+      - analytics\.internal
+      - umami
+      - data-website-id
+    forbid_env:
+      - REDIS_URL
+    forbid_service: []
+    forbid_path: []
+    forbid_flag:
+      - LLM_VKEY
+      - ANALYTICS_SITE
+    witness:
+      - probe: valkey-keys
+        expect: absent
+      - probe: llm-consumer
+        expect: absent
+      - probe: analytics-site
+        expect: absent

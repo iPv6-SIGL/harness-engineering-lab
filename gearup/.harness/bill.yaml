@@ -1,0 +1,72 @@
+app: gearup
+class: process
+budget: 17
+total: 13
+within_budget: true
+scaffold:
+  - openbao
+  - dozzle
+  - registry
+  - postgres
+  - frontend
+  - api
+bought:
+  - brick: temporal
+    points: 2
+    paid_by:
+      - R1
+      - R2
+      - R3
+    needs:
+      - durable-wait
+  - brick: casdoor
+    points: 2
+    paid_by:
+      - R1
+      - R2
+      - R3
+      - R4
+    needs:
+      - identity
+  - brick: temporal-ui
+    points: 1
+    paid_by:
+      - R1
+      - R2
+      - R3
+    needs:
+      - durable-wait
+  - brick: worker
+    points: 2
+    paid_by:
+      - R1
+      - R2
+      - R3
+    needs:
+      - durable-wait
+refused:
+  - brick: valkey
+    points: 2
+    reason: no requirement emits a signal for it
+  - brick: s3
+    points: 1
+    reason: no requirement emits a signal for it
+  - brick: apisix
+    points: 1
+    reason: no requirement emits a signal for it
+  - brick: umami
+    points: 1
+    reason: no requirement emits a signal for it
+flags:
+  - TEMPORAL_NS=1
+gaps: []
+needs:
+  identity:
+    - R1
+    - R2
+    - R3
+    - R4
+  durable-wait:
+    - R1
+    - R2
+    - R3

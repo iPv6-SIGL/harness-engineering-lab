@@ -16,7 +16,7 @@ classes:
     profile: [frontend, api, casdoor, umami, postgres, openbao, registry, dozzle]
   jobs:
     rank: 1
-    trigger_needs: [async-work]
+    trigger_needs: [async-work, scheduled-job]
     budget: 16
     family: Bulk background jobs (PayslipRun)
     profile: [frontend, api, worker, valkey, s3, openbao, registry, dozzle, postgres]

@@ -71,6 +71,14 @@ const BOUGHT: Record<string, Template> = {
     revisit_when: "a job must wait for a person or a timer beyond 30 s (durable-wait → Temporal), or the backlog never drains",
     scales_by: "add worker replicas to the consumer group; each message is processed once",
   },
+  "scheduled-job": {
+    title: "A scheduled job in a worker, claimed in Postgres",
+    chose: "one worker container that wakes on a clock and claims due work in the app's database (one row per send, an advisory lock for a second replica)",
+    rejected: "a Valkey stream and a consumer group for a handful of sends; a cron container outside the bill",
+    avoids: "a stream to watch and competing consumers to size for fewer than 100 units per run",
+    revisit_when: "one run fans out ≥ 100 units (async-work → valkey + worker), or the work must wait for a person or a timer beyond 30 s (durable-wait → Temporal)",
+    scales_by: "an advisory lock makes a second replica safe; the log of what was sent makes a late start or a restart idempotent",
+  },
   "durable-wait": {
     title: "A Temporal workflow per long-running process",
     chose: "one namespace, timers and signals, compensation as activities",
@@ -116,7 +124,7 @@ const BOUGHT: Record<string, Template> = {
 // The tempting purchase a counter-signal refused, and the signal that would make it right.
 const VETO_REVISIT: Record<string, { revisit_when: string; scales_by: string }> = {
   "async-work": {
-    revisit_when: "the recurrence gains a side effect (send, e-mail, notify, charge) or one action fans out ≥ 100 units — then buy valkey + worker with that R-id",
+    revisit_when: "the recurrence gains a side effect (send, e-mail, notify, charge) — then buy a worker with that R-id (scheduled-job); one action fanning out ≥ 100 units buys valkey + worker (async-work)",
     scales_by: "the rule is evaluated at read time in SQL + domain code: cost grows with the rows read, not with a clock",
   },
   "durable-wait": {
@@ -201,6 +209,30 @@ export function decide(brief: Brief, bill: Bill, g: Graph): Decision[] {
       revisit_when: vs.map((v) => VETO_REVISIT[v.need]?.revisit_when ?? `a requirement emits ${v.need} without the counter-signal ${v.rule}`).join("; "),
       scales_by: [...new Set(vs.map((v) => VETO_REVISIT[v.need]?.scales_by).filter(Boolean))].join("; "),
       bricks: refusedBricks,
+      guard,
+    });
+  }
+
+  // 2b. Gaps: the requirement asks for something the platform has no brick for. Recorded, guarded, never filled by the builder.
+  const gapIds = [...new Set(bill.gaps.map((x) => x.id))];
+  for (const gid of gapIds) {
+    const gp = g.gaps.find((x) => x.id === gid)!;
+    const rids = [...new Set(bill.gaps.filter((x) => x.id === gid).map((x) => x.requirement))];
+    const id = next();
+    const title = `Platform gap ${gid.replace(/^G-/, "")}: the CCoE decides`;
+    const guard = emptyGuard(id, title, rids);
+    guard.forbid_import.push(...gp.forbid_import);
+    guard.forbid_pattern.push(...gp.forbid_pattern);
+    decisions.push({
+      id,
+      title,
+      serves: rids,
+      chose: `the requirement is planned without a brick: ${gp.why}`,
+      rejected: "adding a service to the shared platform, or a client library, from inside an app",
+      avoids: "an unmonitored relay, a platform change made by an application, a second way to send",
+      revisit_when: "the CCoE prices a brick for it in criteria.yaml (an airgap upstream or a relay): then buy it with that R-id",
+      scales_by: "nothing runs for it yet: the app records what it would send and the CCoE decides the channel",
+      bricks: [],
       guard,
     });
   }

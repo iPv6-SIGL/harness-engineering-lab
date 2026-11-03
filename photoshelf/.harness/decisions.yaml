@@ -1,0 +1,163 @@
+# the decision log, machine-readable — archived at step 15 into openspec/specs/photoshelf/decisions.md
+- id: D1
+  title: Identity through casdoor (OIDC)
+  serves:
+    &serves
+    - R1
+    - R2
+    - R3
+    - R4
+  chose: "one OIDC client, one group per persona, roles checked server-side"
+  rejected: a users table in the app (a second user store)
+  avoids: "password storage, reset flows, a login screen to secure"
+  revisit_when: "a persona must act without a company account (visitors, partners) — that is a new persona and a new group, not a users table"
+  scales_by: "sessions live in Postgres, so any API replica serves any user; the IdP is shared and scales with the platform"
+  bricks:
+    - casdoor
+  guard:
+    id: D1
+    decision: Identity through casdoor (OIDC)
+    serves:
+      *serves
+    owner: decide step · human-reviewed
+    forbid_import: []
+    forbid_pattern: []
+    forbid_env: []
+    forbid_service: []
+    forbid_path: []
+    forbid_flag: []
+    witness:
+      - probe: secret-read
+        expect: present
+        detail: secret/photoshelf/oidc
+- id: D2
+  title: "Files in the app's S3 bucket"
+  serves:
+    &serves1
+    - R1
+    - R2
+    - R3
+  chose: "the app's bucket with its scoped key, streamed through the API"
+  rejected: files as Postgres blobs
+  avoids: bloated backups and DB reads on every page
+  revisit_when: "a requirement serves the files to anonymous browsers (public-media → PUBLIC_BUCKET=1), or the files need processing (async-work)"
+  scales_by: "the object store holds the bytes, the API only streams them; past ~50 requests/s of downloads, serve signed URLs instead of streaming"
+  bricks:
+    - s3
+  guard:
+    id: D2
+    decision: "Files in the app's S3 bucket"
+    serves:
+      *serves1
+    owner: decide step · human-reviewed
+    forbid_import: []
+    forbid_pattern: []
+    forbid_env: []
+    forbid_service: []
+    forbid_path: []
+    forbid_flag: []
+    witness: []
+- id: D3
+  title: "Anonymous read on the app's bucket only"
+  serves:
+    &serves2
+    - R2
+  chose: PUBLIC_BUCKET=1 — browsers load the files directly
+  rejected: proxying every image through the API
+  avoids: an API round-trip and its CPU per image view
+  revisit_when: "a file in the bucket must stay private — split it into a second, private prefix with its own decision"
+  scales_by: browsers hit the object store directly; the API is out of the read path
+  bricks: []
+  guard:
+    id: D3
+    decision: "Anonymous read on the app's bucket only"
+    serves:
+      *serves2
+    owner: decide step · human-reviewed
+    forbid_import: []
+    forbid_pattern: []
+    forbid_env: []
+    forbid_service: []
+    forbid_path: []
+    forbid_flag: []
+    witness: []
+- id: D4
+  title: Background work on a Valkey stream drained by a worker
+  serves:
+    &serves3
+    - R1
+    - R2
+  chose: "a consumer group of competing workers, the API answers 202"
+  rejected: doing the work inside the request
+  avoids: "requests above the 350 ms budget, timeouts under load"
+  revisit_when: "a job must wait for a person or a timer beyond 30 s (durable-wait → Temporal), or the backlog never drains"
+  scales_by: add worker replicas to the consumer group; each message is processed once
+  bricks:
+    - valkey
+    - worker
+  guard:
+    id: D4
+    decision: Background work on a Valkey stream drained by a worker
+    serves:
+      *serves3
+    owner: decide step · human-reviewed
+    forbid_import: []
+    forbid_pattern: []
+    forbid_env: []
+    forbid_service: []
+    forbid_path: []
+    forbid_flag: []
+    witness: []
+- id: D5
+  title: Nothing unasked
+  serves:
+    - "*"
+  chose: "stay out: apisix, temporal, umami — no requirement emits a signal for them"
+  rejected: "apisix \"in case\", temporal \"in case\", umami \"in case\""
+  avoids: "4 ops points: 1 virtual key, a token budget, provider quirks, evals; 1 namespace, workflow versioning on every deploy, runs to watch; 1 website, a beacon proxied first-party, a privacy register entry"
+  revisit_when: "apisix: the app generates, classifies, summarises or embeds text; temporal: a step waits, retries for hours, compensates, or waits for a human; umami: a usage metric is named in the brief"
+  scales_by: "nothing to scale: what does not run costs nothing"
+  bricks:
+    - apisix
+    - temporal
+    - umami
+  guard:
+    id: D5
+    decision: Nothing unasked
+    serves:
+      - "*"
+    owner: decide step · human-reviewed
+    forbid_import:
+      - openai
+      - "@anthropic-ai/sdk"
+      - ai
+      - "@ai-sdk/openai"
+      - langchain
+      - "@temporalio/client"
+      - "@temporalio/worker"
+      - "@temporalio/workflow"
+    forbid_pattern:
+      - llm\.internal
+      - api\.openai\.com
+      - api\.anthropic\.com
+      - task:(cheap|quality|vision|reasoning|embed|image)
+      - temporal\.internal
+      - "@temporalio/"
+      - analytics\.internal
+      - umami
+      - data-website-id
+    forbid_env:
+      - TEMPORAL_ADDRESS
+    forbid_service: []
+    forbid_path: []
+    forbid_flag:
+      - LLM_VKEY
+      - TEMPORAL_NS
+      - ANALYTICS_SITE
+    witness:
+      - probe: llm-consumer
+        expect: absent
+      - probe: temporal-namespace
+        expect: absent
+      - probe: analytics-site
+        expect: absent

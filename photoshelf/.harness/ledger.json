@@ -1,0 +1,150 @@
+{
+  "app": "photoshelf",
+  "run": "run-20261103-112137",
+  "prompt_hash": "c886a7a97d51",
+  "tasks": [
+    {
+      "id": "1.1",
+      "title": "PUBLIC_BUCKET=1 APP=photoshelf ./bootstrap.sh",
+      "owner": "harness",
+      "scenarios": [
+        "C1 ready"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-11-03T21:11:47.112Z"
+    },
+    {
+      "id": "1.2",
+      "title": "OIDC client + 2 test personas (marketing, catalog-manager)",
+      "owner": "harness",
+      "scenarios": [
+        "C1 oidc"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-11-03T21:11:47.218Z"
+    },
+    {
+      "id": "2.1",
+      "title": "Data model and seed (migrations in api/src/db.ts)",
+      "owner": "builder",
+      "scenarios": [
+        "R1 upload-resized"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-11-03T21:11:47.778Z"
+    },
+    {
+      "id": "3.1",
+      "title": "R1 · Marketing uploads raw product photos, up to 200 in one batch; each one is resized to WebP sizes 320, 800 and 1600 pixels wide.",
+      "owner": "builder",
+      "requirement": "R1",
+      "scenarios": [
+        "R1 upload-resized",
+        "R1 batch-200",
+        "R1 never-upscaled",
+        "R1 not-an-image"
+      ],
+      "passes": true,
+      "tries": 1,
+      "status": "passed",
+      "last_run": "2026-11-03T21:11:50.212Z"
+    },
+    {
+      "id": "3.2",
+      "title": "R2 · The resized WebP images of the uploaded photos are served on a public URL for the shop pages; an anonymous browser loads them without signing in.",
+      "owner": "builder",
+      "requirement": "R2",
+      "scenarios": [
+        "R2 public-url",
+        "R2 shop-listing"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-11-03T21:11:51.578Z"
+    },
+    {
+      "id": "3.3",
+      "title": "R3 · A catalog manager takes a photo off the shop and can put it back; a photo taken off the shop is no longer listed and its public URLs stop answering.",
+      "owner": "builder",
+      "requirement": "R3",
+      "scenarios": [
+        "R3 take-off",
+        "R3 put-back",
+        "R3 marketing-cannot-take-off"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-11-03T21:11:53.372Z"
+    },
+    {
+      "id": "3.4",
+      "title": "R4 · Marketing and catalog managers sign in once with their company account; each persona only performs the actions of its role.",
+      "owner": "builder",
+      "requirement": "R4",
+      "scenarios": [
+        "R4 sso-login",
+        "R4 anonymous-refused"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-11-03T21:11:53.510Z"
+    },
+    {
+      "id": "4.1",
+      "title": "Screens: the persona journeys in frontend/",
+      "owner": "builder",
+      "scenarios": [
+        "C1 frontend"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-11-03T21:11:53.612Z"
+    },
+    {
+      "id": "5.1",
+      "title": "Contracts: /health, /ready, ports 8020–8021, SIGTERM < 10 s",
+      "owner": "builder",
+      "scenarios": [
+        "C1 health",
+        "C1 ready"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-11-03T21:11:53.723Z"
+    },
+    {
+      "id": "5.2",
+      "title": "Stateless API: no state in the process — a session survives an API restart, so a second replica can serve it",
+      "owner": "builder",
+      "scenarios": [
+        "C1 stateless"
+      ],
+      "passes": true,
+      "tries": 0,
+      "status": "passed",
+      "last_run": "2026-11-03T21:11:55.780Z"
+    }
+  ],
+  "gates": {
+    "spec": {
+      "approved": true,
+      "by": "Myth-F (in chat)",
+      "at": "2026-11-03T11:26:29.361Z",
+      "note": "bill and D1-D5 reviewed"
+    },
+    "merge": {
+      "approved": false
+    }
+  }
+}

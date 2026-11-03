@@ -1,0 +1,57 @@
+# The GearUp brief (process class): an employee asks for gear, the manager has
+# days to answer, the order can fail at the supplier and must then be undone.
+app: gearup
+version: 1
+port_block: 8030
+prompt: >
+  Build GearUp: an employee asks for a laptop or other gear from the catalog;
+  their manager has 3 days to approve it, with a reminder after 2 days. An
+  approved request is ordered from the supplier and paid from the team budget;
+  when the supplier fails, the order is cancelled and the budget refunded.
+personas:
+  - {slug: employee, does: asks for gear from the catalog and follows their requests}
+  - {slug: manager, does: "approves or rejects the requests of the team, within the team budget; also asks like an employee"}
+requirements:
+  - id: R1
+    persona: employee
+    text: An employee asks for a laptop or other gear from the catalog; the manager has 3 days to approve, with a reminder after 2 days; without an answer the request expires and nothing is ordered.
+    scenarios:
+      - {id: ask-waits, when: an employee asks for a laptop, then: "the request waits for the manager, with a reminder due 2 days later and an expiry 3 days later"}
+      - {id: survives-restart, when: the worker is restarted while a request waits for the manager, then: the manager's approval afterwards still orders it}
+      - {id: one-open-per-item, when: an employee asks for the same item while an earlier request for it is still waiting, then: the second request is refused with 409}
+  - id: R2
+    persona: manager
+    text: The manager approves or rejects the request; an approved request is ordered from the supplier and its price is taken from the team budget; a request above the remaining budget cannot be approved.
+    scenarios:
+      - {id: approve-orders, when: the manager approves a waiting request, then: the request is ordered and the team budget drops by the item's price}
+      - {id: reject-closes, when: the manager rejects a waiting request, then: the request is closed as rejected and the budget is unchanged}
+      - {id: over-budget, when: the manager approves a request whose price is above the remaining team budget, then: the approval is refused with 409 and the request keeps waiting}
+      - {id: employee-cannot-approve, when: an employee tries to approve a request, then: the API answers 403}
+  - id: R3
+    persona: manager
+    text: When the supplier fails the order is cancelled and the budget refunded.
+    scenarios:
+      - {id: supplier-fails, when: the manager approves a request for an item the supplier cannot deliver, then: "the order is cancelled, the request ends as cancelled, and the team budget is back to its amount before the approval"}
+      - {id: refund-once, when: the supplier failure is retried, then: the budget is refunded exactly once}
+  - id: R4
+    persona: employee
+    text: Employees and managers sign in once with their company account; each persona only performs the actions of its role.
+    scenarios:
+      - {id: sso-login, when: an employee signs in through the company IdP, then: the app knows the employee and their role}
+      - {id: anonymous-refused, when: someone calls the API without signing in, then: the API answers 401 in the error envelope}
+data:
+  - {entity: employees, volume: about 300 in 30 teams}
+  - {entity: catalog items, volume: "about 20 (laptops, screens, headsets, docks)"}
+  - {entity: requests, volume: "about 40 a week, each open for at most 3 days"}
+  - {entity: team budgets, volume: "one per team, about 15000 EUR a year"}
+never:
+  - an order placed without the manager's approval
+  - an order placed after its request expired or was rejected
+  - a team budget below zero
+  - a budget charged twice or refunded twice for the same request
+out_of_scope:
+  - a real supplier API (the supplier is simulated by a seeded stock list)
+  - e-mail or chat notifications (the reminder shows in the manager's list)
+  - delivery tracking after the order
+  - several approval levels (only the direct manager approves)
+  - a native mobile app
